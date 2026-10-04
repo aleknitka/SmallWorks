@@ -76,8 +76,10 @@ frontier-first for decisions, self-hosted-first for execution.
 ## Repo layout
 
 ```text
-src/smallworks/   control layer (cli.py, config.py, schemas.py, service.py, store.py)
+src/smallworks/   control layer (cli.py, config.py, gateway.py, logging.py,
+                  schemas.py, service.py, store.py)
 configs/          models.yaml (group routing), workers.yaml (roles), factory.yaml (autonomy)
+logs/             loguru file sink (smallworks.log, gitignored, ./logs:/app/logs in compose)
 docs/spec/        system specification (normative)
 docs/plans/       phased implementation plans
 tests/            contract/behaviour tests
@@ -112,8 +114,26 @@ API: `GET /api/runs`, `GET /api/runs/{id}`, `GET/POST /api/runs/{id}/chat`.
 - `configs/factory.yaml` — supervised-autonomy policy: tier rules, escalation
   (`max_retries` before climbing tiers), human approval gates, hard budgets.
 
-## Evaluation
+## Gateway (Phase 02)
 
+`src/smallworks/gateway.py` routes each role through its group in declared
+order, retrying to the next deployment (capped by `factory.max_retries`),
+bounding concurrency by `workers.yaml max_concurrent`, and pausing with
+`BudgetExceeded` when cost/wall-clock exceeds factory budgets. One interface
+covers Ollama, vLLM, and frontier-behind-LiteLLM (all OpenAI-compatible
+`POST {base}/chat/completions`); endpoints come from `OLLAMA_BASE_URL`,
+`VLLM_BASE_URL`, `LITELLM_PROXY_URL`. Every success returns model, provider,
+class, tokens, cost, latency, attempts for later `RunReport`.
+
+## Logging
+
+Loguru, DEBUG by default, rich from the first line: stderr (color) + rotating
+file (`logs/smallworks.log`, 10 MB / 7 days, gitignored). Every record carries
+bound context (`component`, `task_id`, `role`, `deployment`, …). Flags:
+`--log-level`, `--log-file`; env `SMALLWORKS_LOG_LEVEL`,
+`SMALLWORKS_LOG_DIR`. Check `logs/smallworks.log` first when investigating.
+
+## Evaluation
 Baseline (one frontier model on the repo) vs SmallWorks (frontier-led,
 self-hosted execution) on: task completion, tests passed, retries, human
 interventions, regressions, tokens, wall-clock/GPU time, API cost, context

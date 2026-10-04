@@ -87,3 +87,61 @@ def load_configs(models_path: Path, workers_path: Path) -> LoadedConfig:
 
 def default_config_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "configs"
+
+
+class EscalationPolicy(BaseModel):
+    max_retries: int = Field(ge=1)
+    high_complexity_goes_frontier: bool = True
+
+
+class FactoryBudgets(BaseModel):
+    max_cost_per_task: float = Field(gt=0)
+    max_wallclock_minutes: float = Field(gt=0)
+
+
+class FactoryPolicy(BaseModel):
+    """Supervised-autonomy policy (spec §10): escalation + approvals + budgets."""
+
+    mode: str = Field(min_length=1)
+    max_retries: int = Field(ge=1)
+    approvals_required: list[str] = Field(min_length=1)
+    max_cost_per_task: float = Field(gt=0)
+    max_wallclock_minutes: float = Field(gt=0)
+
+
+def load_factory(path: Path) -> FactoryPolicy:
+    """Load supervised-autonomy policy; fail fast on missing budgets/escalation."""
+    from smallworks.logging import logger
+
+    data = _read_yaml(path)
+    raw = data.get("factory")
+    if not isinstance(raw, dict):
+        raise ValueError(f"config {path} needs a 'factory' mapping")
+    esc_raw = raw.get("escalation")
+    if not isinstance(esc_raw, dict):
+        raise ValueError(f"config {path} needs a 'factory.escalation' mapping")
+    bud_raw = raw.get("budgets")
+    if not isinstance(bud_raw, dict) or not bud_raw:
+        raise ValueError(f"config {path} needs a non-empty 'factory.budgets' mapping")
+    escalation = EscalationPolicy.model_validate(esc_raw)
+    budgets = FactoryBudgets.model_validate(bud_raw)
+    approvals = raw.get("approvals_required")
+    if not isinstance(approvals, list) or not approvals:
+        raise ValueError(f"config {path} needs a non-empty 'factory.approvals_required' list")
+    policy = FactoryPolicy(
+        mode=str(raw.get("mode", "supervised")),
+        max_retries=escalation.max_retries,
+        approvals_required=[str(a) for a in approvals],
+        max_cost_per_task=budgets.max_cost_per_task,
+        max_wallclock_minutes=budgets.max_wallclock_minutes,
+    )
+    logger.bind(component="config", factory=str(path)).debug(
+        "factory policy loaded mode={} max_retries={} approvals={} "
+        "max_cost={} max_minutes={}",
+        policy.mode,
+        policy.max_retries,
+        policy.approvals_required,
+        policy.max_cost_per_task,
+        policy.max_wallclock_minutes,
+    )
+    return policy

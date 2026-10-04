@@ -11,3 +11,6 @@ wheels/
 
 # Test caches
 .pytest_cache/
+
+# Runtime logs (loguru file sink)
+logs/

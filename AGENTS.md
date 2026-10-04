@@ -13,11 +13,13 @@ GitHub Issues + Projects (task board).
 
 ## Repo layout
 
-- `src/smallworks/` — control layer: `cli.py`, `config.py`, `schemas.py`,
-  `service.py` (FastAPI: runs + orchestrator chat), `store.py`, `ui.html`
+- `src/smallworks/` — control layer: `cli.py`, `config.py` (incl. `FactoryPolicy`),
+  `gateway.py` (group routing + fallback + budgets), `logging.py` (loguru DEBUG),
+  `schemas.py`, `service.py` (FastAPI: runs + orchestrator chat), `store.py`, `ui.html`
 - `configs/` — `models.yaml` (logical model groups → deployments with class),
   `workers.yaml` (roles, model tiers, concurrency bounds),
   `factory.yaml` (supervised-autonomy: tiers, escalation, gates, budgets)
+- `logs/` — gitignored loguru file sink; check first when investigating
 - `docs/spec/` — system specification (normative)
 - `tests/` — contract/behaviour tests
 - `Dockerfile`, `compose.yaml` — container app (podman + docker compatible)

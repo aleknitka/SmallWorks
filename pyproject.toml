@@ -12,6 +12,8 @@ dependencies = [
     "pyyaml>=6",
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "httpx>=0.28",
+    "loguru>=0.7",
 ]
 
 [project.scripts]
