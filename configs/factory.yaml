@@ -1,0 +1,25 @@
+# Semi-autonomous factory policy: what runs itself, what escalates, what needs a human.
+# Routine work is autonomous within these bounds; humans approve gates, not every step.
+factory:
+  mode: supervised
+
+  # Frontier decides, self-hosted executes; escalations climb tiers.
+  tiers:
+    routine: self-hosted # engineer breakdown, developer, tester, writer, routine review
+    decisions: frontier # orchestration, architecture, escalated retries, disputed reviews
+
+  escalation:
+    max_retries: 2 # consecutive failures on self-hosted before tier escalation
+    high_complexity_goes_frontier: true
+    # small -> medium -> large; large + still failing -> human
+
+  approvals_required: # human gates (spec §10); everything else runs autonomously
+    - blueprint
+    - release
+    - escalate # worker asked for help -> human sees it
+    - security_failed
+    - budget_exceeded
+
+  budgets: # hard stops; exceeding pauses the run and asks a human
+    max_cost_per_task: 5.0
+    max_wallclock_minutes: 60

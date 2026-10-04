@@ -1,0 +1,28 @@
+# Role → model group, tier, and concurrency bounds (spec §5).
+# Bounds: GPU memory, rate limits, cost budgets, dependencies.
+workers:
+  orchestrator:
+    model_group: strong_reasoning
+    tier: large
+    max_concurrent: 1
+  architect:
+    model_group: strong_reasoning
+    tier: large
+    max_concurrent: 1
+    enabled: false  # Phase 2 (spec §15)
+  engineer:
+    model_group: engineering
+    tier: medium
+    max_concurrent: 4
+  developer:
+    model_group: coder_fast
+    tier: small
+    max_concurrent: 8
+  tester:
+    model_group: coder_fast
+    tier: small
+    max_concurrent: 8
+  reviewer:
+    model_group: reviewer
+    tier: medium
+    max_concurrent: 4

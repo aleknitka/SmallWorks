@@ -1,0 +1,34 @@
+# Logical model groups → deployments (spec §4).
+# Workers reference group names only, never provider IDs.
+#
+# Factory policy: routine execution runs self-hosted-first (cheap, private,
+# fast); frontier models decide and rescue (orchestration, architecture,
+# escalations, disputed reviews). `class` marks each deployment; order =
+# default preference. Full autonomy bounds live in configs/factory.yaml.
+models:
+  # Frontier-first: orchestrator triage, architect blueprints.
+  strong_reasoning:
+    - name: external/frontier-reasoning
+      class: frontier
+    - name: ollama/llama3.1-70b
+      class: self-hosted
+  # Self-hosted-first: plan breakdown; escalate to frontier on retry.
+  engineering:
+    - name: ollama/qwen2.5-coder-27b
+      class: self-hosted
+    - name: external/frontier-engineering
+      class: frontier
+  # Self-hosted-first: bounded implementation and test execution.
+  coder_fast:
+    - name: ollama/qwen2.5-coder-8b
+      class: self-hosted
+    - name: vllm/qwen2.5-coder-14b
+      class: self-hosted
+    - name: external/frontier-coder
+      class: frontier
+  # Self-hosted-first: routine review; frontier breaks ties / escalations.
+  reviewer:
+    - name: ollama/qwen2.5-coder-27b
+      class: self-hosted
+    - name: external/frontier-reviewer
+      class: frontier

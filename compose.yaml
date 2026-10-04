@@ -1,0 +1,21 @@
+# Works with `docker compose` and `podman-compose`.
+# Podman: `podman-compose up --build` (or `podman compose` with podman ≥ 4.1).
+services:
+  app:
+    build: .
+    image: smallworks:latest
+    container_name: smallworks
+    ports:
+      - "${SMALLWORKS_PORT:-8000}:8000"
+    volumes:
+      # Configs mounted so model/worker tuning needs no rebuild.
+      - ./configs:/app/configs:ro
+    environment:
+      SMALLWORKS_PORT: ${SMALLWORKS_PORT:-8000}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/runs')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
