@@ -17,7 +17,8 @@ GitHub Issues + Projects (task board).
   `gateway.py` (routing + budgets), `logging.py`, `context.py` + `adapters/`,
   `workers/` (role prompts), `workflow.py` (gated loop), `worktrees.py`,
   `supervision.py` (board fields + controls + RunReport), `board.py` (`gh` sync),
-  `schemas.py`, `service.py` (runs/chat/control/logs/cost API), `store.py`, `ui.html`
+  `eval/` (baseline vs pipeline harness + §13 report), `schemas.py`,
+  `service.py` (runs/chat/control/logs/cost API), `store.py`, `ui.html`
 - `configs/` — `models.yaml` (logical model groups → deployments with class),
   `workers.yaml` (roles, model tiers, concurrency bounds),
   `factory.yaml` (supervised-autonomy: tiers, escalation, gates, budgets)

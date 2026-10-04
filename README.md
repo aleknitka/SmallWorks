@@ -173,12 +173,18 @@ bound context (`component`, `task_id`, `role`, `deployment`, …). Flags:
 `--log-level`, `--log-file`; env `SMALLWORKS_LOG_LEVEL`,
 `SMALLWORKS_LOG_DIR`. Check `logs/smallworks.log` first when investigating.
 
-## Evaluation
-Baseline (one frontier model on the repo) vs SmallWorks (frontier-led,
-self-hosted execution) on: task completion, tests passed, retries, human
-interventions, regressions, tokens, wall-clock/GPU time, API cost, context
-size, escalation frequency. Every run records a `RunReport` (§12) — worker, model,
-tokens, cost, context sources, tool calls, result.
+## Evaluation (Phase 06)
+
+`src/smallworks/eval/` pins a fixture task set and runs two arms: Baseline
+(one large model, full-repo context) vs SmallWorks (real gated
+`run_workflow` loop with bounded packets). Every §13 metric is captured per
+arm — completion, tests, retries, human interventions, regressions, tokens,
+wall-clock/GPU time, API cost, context chars, escalations — from `RunReport`s
+plus test results. `compare` renders side-by-side rows with a hypothesis
+verdict (`SUPPORTED` when SmallWorks completes at least as much with lower
+cost or context); `save_report`/`load_report` persist comparison + raw
+outputs so a re-run reproduces the verdict. Deterministic: seeded retries,
+isolated worktrees per attempt. Findings feed plan 07; no auto-tuning here.
 
 ## MVP scope / non-goals
 
