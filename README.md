@@ -76,8 +76,8 @@ frontier-first for decisions, self-hosted-first for execution.
 ## Repo layout
 
 ```text
-src/smallworks/   control layer (cli.py, config.py, gateway.py, logging.py,
-                  schemas.py, service.py, store.py)
+src/smallworks/   control layer (cli.py, config.py, context.py, gateway.py,
+                  logging.py, schemas.py, service.py, store.py, adapters/)
 configs/          models.yaml (group routing), workers.yaml (roles), factory.yaml (autonomy)
 logs/             loguru file sink (smallworks.log, gitignored, ./logs:/app/logs in compose)
 docs/spec/        system specification (normative)
@@ -124,6 +124,18 @@ covers Ollama, vLLM, and frontier-behind-LiteLLM (all OpenAI-compatible
 `POST {base}/chat/completions`); endpoints come from `OLLAMA_BASE_URL`,
 `VLLM_BASE_URL`, `LITELLM_PROXY_URL`. Every success returns model, provider,
 class, tokens, cost, latency, attempts for later `RunReport`.
+
+## Context (Phase 03)
+
+`src/smallworks/context.py` builds fresh `ContextPacket`s (goal, contract,
+symbols, tests, rules) under a char budget (default 8 000): progressive
+disclosure summary → symbols → source → file, overflow truncated with `ref:`
+pointers. Developer packets never include Repomix repo dumps. Adapters in
+`src/smallworks/adapters/`: `serena.py` (symbols/references/callers, not
+files), `repomix.py` (repo overview, Architect/Engineer only), `rtk.py`
+(head+tail compression, raw kept in `RecallStore`, ref surfaces as
+`TestReport.raw_output_ref`), `caveman.py` (structured status/reason/next,
+no prose).
 
 ## Logging
 

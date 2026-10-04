@@ -15,6 +15,7 @@ GitHub Issues + Projects (task board).
 
 - `src/smallworks/` — control layer: `cli.py`, `config.py` (incl. `FactoryPolicy`),
   `gateway.py` (group routing + fallback + budgets), `logging.py` (loguru DEBUG),
+  `context.py` (budgeted packets) + `adapters/` (serena/repomix/rtk/caveman),
   `schemas.py`, `service.py` (FastAPI: runs + orchestrator chat), `store.py`, `ui.html`
 - `configs/` — `models.yaml` (logical model groups → deployments with class),
   `workers.yaml` (roles, model tiers, concurrency bounds),
