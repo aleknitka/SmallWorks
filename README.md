@@ -77,7 +77,8 @@ frontier-first for decisions, self-hosted-first for execution.
 
 ```text
 src/smallworks/   control layer (cli.py, config.py, context.py, gateway.py,
-                  logging.py, schemas.py, service.py, store.py, adapters/)
+                  logging.py, schemas.py, service.py, store.py, adapters/,
+                  workers/ role prompts, workflow.py TAKT loop, worktrees.py)
 configs/          models.yaml (group routing), workers.yaml (roles), factory.yaml (autonomy)
 logs/             loguru file sink (smallworks.log, gitignored, ./logs:/app/logs in compose)
 docs/spec/        system specification (normative)
@@ -136,6 +137,19 @@ files), `repomix.py` (repo overview, Architect/Engineer only), `rtk.py`
 (head+tail compression, raw kept in `RecallStore`, ref surfaces as
 `TestReport.raw_output_ref`), `caveman.py` (structured status/reason/next,
 no prose).
+
+## Workflow (Phase 04)
+
+`src/smallworks/workflow.py` runs the supervised dev loop per task: request →
+engineer → plan → develop (git-worktree isolated) ↔ test → review → gated
+decision (`pass` / `retry` / `escalate` via `validate_decision`) → write →
+done. Retry loops back to develop, bounded by `factory.max_retries`; spent
+budget, reviewer `ESCALATE`, or budget breach escalates to a human.
+Independent modules run concurrently via `run_workflow` (thread pool, same
+gated sequence per task). Role prompts live in `src/smallworks/workers/`:
+engineer (tasks JSON), developer (patch JSON, allowed-files only),
+tester (independent report JSON), reviewer (PASS/RETRY/ESCALATE JSON), writer
+(docs text). Orchestrator routes only — it has no code-writing prompt.
 
 ## Logging
 
