@@ -31,6 +31,13 @@ def build_parser() -> argparse.ArgumentParser:
     vc = sub.add_parser("validate-config", help="Load models/workers YAMLs and print role -> group mapping")
     vc.add_argument("--models", type=Path, default=None, help="Path to models.yaml")
     vc.add_argument("--workers", type=Path, default=None, help="Path to workers.yaml")
+    st = sub.add_parser("status", help="Show run status from the store (spec §10 board fields)")
+    st.add_argument("run_id", nargs="?", default=None, help="Run id; omit for all runs")
+    lg = sub.add_parser("logs", help="Show run logs (compressed by default, --raw via ref)")
+    lg.add_argument("run_id", help="Run id")
+    lg.add_argument("--raw", action="store_true", help="Recall full raw output via RTK ref")
+    ct = sub.add_parser("cost", help="Show cost/tokens for a task across runs")
+    ct.add_argument("task_id", help="Task id, e.g. AUTH-017")
     serve = sub.add_parser("serve", help="Run the container web service (runs + orchestrator chat)")
     serve.add_argument("--host", default="0.0.0.0")
     serve.add_argument("--port", type=int, default=8000)
@@ -56,6 +63,57 @@ def cmd_validate_config(models: Path | None, workers: Path | None) -> int:
     return 0
 
 
+def cmd_status(run_id: str | None) -> int:
+    from smallworks.store import STORE
+
+    log = logger.bind(component="cli", command="status", run_id=run_id)
+    if run_id is not None:
+        run = STORE.get_run(run_id)
+        if run is None:
+            print(f"unknown run: {run_id}", file=sys.stderr)
+            return 1
+        runs = [run]
+    else:
+        runs = STORE.list_runs()
+    for run in runs:
+        board = run.board
+        test_status = board.test_status if board else "-"
+        print(f"{run.run_id} {run.task_id} {run.status.value} {run.worker} {run.model} tests={test_status}")
+        if board and board.latest_report:
+            print(f"  latest: {board.latest_report}")
+    log.debug("status runs={}", len(runs))
+    return 0
+
+
+def cmd_logs(run_id: str, *, raw: bool = False) -> int:
+    from smallworks.store import STORE
+
+    log = logger.bind(component="cli", command="logs", run_id=run_id, raw=raw)
+    body = STORE.get_logs(run_id, raw=raw)
+    if body is None:
+        print(f"unknown run: {run_id}", file=sys.stderr)
+        return 1
+    if not body:
+        print("(no logs)")
+        return 0
+    for chunk in body:
+        print(chunk)
+        print("---")
+    log.debug("logs chunks={}", len(body))
+    return 0
+
+
+def cmd_cost(task_id: str) -> int:
+    from smallworks.store import STORE
+
+    cost, inp, out = STORE.cost_for_task(task_id)
+    logger.bind(component="cli", command="cost", task_id=task_id).debug(
+        "cost={} in={} out={}", cost, inp, out
+    )
+    print(f"{task_id}: ${cost:.4f} in={inp} out={out}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     target = configure_logging(level=args.log_level, log_file=args.log_file)
@@ -66,6 +124,12 @@ def main(argv: list[str] | None = None) -> None:
         print("spec: docs/spec/SmallWorks-InitialSystemSpecification.md")
     elif args.command == "validate-config":
         raise SystemExit(cmd_validate_config(args.models, args.workers))
+    elif args.command == "status":
+        raise SystemExit(cmd_status(args.run_id))
+    elif args.command == "logs":
+        raise SystemExit(cmd_logs(args.run_id, raw=args.raw))
+    elif args.command == "cost":
+        raise SystemExit(cmd_cost(args.task_id))
     elif args.command == "serve":
         import uvicorn
 

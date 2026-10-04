@@ -116,6 +116,10 @@ class RunReport(BaseModel):
     cost: float = Field(ge=0.0)
     status: TaskStatus
     parent_task: str | None = None
+    context_sources: list[str] = Field(default_factory=list)
+    tool_calls: int = Field(ge=0, default=0)
+    result: str = ""
+    artefacts: list[str] = Field(default_factory=list)
 
 
 def validate_decision(

@@ -10,10 +10,19 @@
   .u { color: #1a5fb4; } .o { color: #1a7a2e; }
   form { display: flex; gap: .5em; margin-top: 1em; }
   input { flex: 1; padding: .5em; }
+  #controls { display: flex; gap: .5em; margin-top: 1em; flex-wrap: wrap; }
+  #controls button { padding: .4em .8em; }
 </style>
 <h1>SmallWorks</h1>
 <h2>Runs</h2>
 <ul id="runs"></ul>
+<div id="controls">
+  <button data-a="pause">Pause</button>
+  <button data-a="retry">Retry</button>
+  <button data-a="escalate">Escalate</button>
+  <button data-a="approve">Approve gate</button>
+  <button data-a="reject">Reject gate</button>
+</div>
 <h2>Orchestrator chat</h2>
 <div id="chat"></div>
 <form id="f"><input id="msg" placeholder="Message the orchestrator…" autocomplete="off"><button>Send</button></form>
@@ -37,6 +46,10 @@ document.getElementById("f").onsubmit = async e => {
   el.value = "";
   chat();
 };
+document.querySelectorAll("#controls button").forEach(b => b.onclick = async () => {
+  await fetch(`/api/runs/${runId}/control`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({action: b.dataset.a})});
+  runs();
+});
 runs(); chat(); setInterval(() => { runs(); chat(); }, 5000);
 </script>
 </html>

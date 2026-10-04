@@ -13,12 +13,11 @@ GitHub Issues + Projects (task board).
 
 ## Repo layout
 
-- `src/smallworks/` — control layer: `cli.py`, `config.py` (incl. `FactoryPolicy`),
-  `gateway.py` (group routing + fallback + budgets), `logging.py` (loguru DEBUG),
-  `context.py` (budgeted packets) + `adapters/` (serena/repomix/rtk/caveman),
-  `workers/` (role prompts, strict JSON), `workflow.py` (gated dev loop),
-  `worktrees.py` (task isolation), `schemas.py`,
-  `service.py` (FastAPI: runs + orchestrator chat), `store.py`, `ui.html`
+- `src/smallworks/` — control layer: `cli.py` (`status`/`logs`/`cost`), `config.py`,
+  `gateway.py` (routing + budgets), `logging.py`, `context.py` + `adapters/`,
+  `workers/` (role prompts), `workflow.py` (gated loop), `worktrees.py`,
+  `supervision.py` (board fields + controls + RunReport), `board.py` (`gh` sync),
+  `schemas.py`, `service.py` (runs/chat/control/logs/cost API), `store.py`, `ui.html`
 - `configs/` — `models.yaml` (logical model groups → deployments with class),
   `workers.yaml` (roles, model tiers, concurrency bounds),
   `factory.yaml` (supervised-autonomy: tiers, escalation, gates, budgets)

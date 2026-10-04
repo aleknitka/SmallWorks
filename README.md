@@ -151,6 +151,20 @@ engineer (tasks JSON), developer (patch JSON, allowed-files only),
 tester (independent report JSON), reviewer (PASS/RETRY/ESCALATE JSON), writer
 (docs text). Orchestrator routes only — it has no code-writing prompt.
 
+## Supervision (Phase 05)
+
+Board is GitHub Issues + Projects, not a custom dashboard:
+`src/smallworks/board.py` renders `BoardRecord` (§10 fields: status, role,
+model, dependencies, attempt, test status, latest report, artefacts,
+cost/tokens) to an Issue body and syncs via `gh`. Human controls are workflow
+inputs (`supervision.apply_control`: pause, cancel, retry, escalate,
+change-model, send-back-to-Engineer, instruct, approve/reject) applied to run
+state via the store or `POST /api/runs/{id}/control` (buttons in the UI).
+Every run emits a §12 `RunReport` (worker, model, provider, tokens, cost,
+context sources, tool calls, result, artefacts), persisted as JSON.
+CLI: `status [run]`, `logs <run> [--raw]` (RTK-compressed, raw via ref),
+`cost <task>`.
+
 ## Logging
 
 Loguru, DEBUG by default, rich from the first line: stderr (color) + rotating
