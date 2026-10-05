@@ -33,9 +33,15 @@ ControlAction = Literal[
 
 
 class TaskControl(BaseModel):
-    """One human input to the workflow; the orchestrator drains these FIFO."""
+    """One human input to the workflow; the orchestrator drains these FIFO.
 
-    task_id: str = Field(pattern=r"^[A-Z]+-\d+$")
+    ``task_id`` addresses a task (``AUTH-017``) or a milestone (``AUTH-M1``)
+    for milestone-scoped actions: ``approve``/``reject`` close the milestone
+    gate, ``send_back`` returns the milestone's tasks to the Engineer,
+    ``pause``/``cancel``/``retry`` behave per-target.
+    """
+
+    task_id: str = Field(pattern=r"^[A-Z]+-(\d+|M\d+)$")
     action: ControlAction
     argument: str = ""  # model name, instructions, rejection reason, ...
     actor: str = "human"

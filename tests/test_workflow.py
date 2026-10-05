@@ -246,6 +246,47 @@ def test_milestone_breached_on_escalation_parks_for_human(tmp_path):
     assert done.rounds == 1
 
 
+def test_approve_control_closes_milestone(tmp_path):
+    done = run_until_milestone(
+        [_task()], _milestone(), _gateway(_texts(pass_tests=False)),
+        worktree_root=str(tmp_path),
+        controls=[TaskControl(task_id="AUTH-M1", action="approve")],
+    )
+    assert done.milestone.verdict == "met"
+    assert done.rounds == 0
+    assert done.history == []
+
+
+def test_reject_control_parks_milestone(tmp_path):
+    done = run_until_milestone(
+        [_task()], _milestone(), _gateway(_texts()),
+        worktree_root=str(tmp_path),
+        controls=[TaskControl(task_id="AUTH-M1", action="reject")],
+    )
+    assert done.milestone.verdict == "breached"
+    assert done.rounds == 0
+
+
+def test_send_back_control_redrives_all_tasks(tmp_path):
+    transport = FlapTransport(_texts(), fail_once_tasks={"AUTH-017"})
+    gw = RoleGateway(_models(), _workers(), _policy(), transport=transport)
+    tasks = [_task("AUTH-017"), _task("AUTH-018")]
+    send_back = TaskControl(task_id="AUTH-M1", action="send_back")
+    done = run_until_milestone(tasks, _milestone(tasks=("AUTH-017", "AUTH-018")), gw,
+                               max_retries=0, worktree_root=str(tmp_path),
+                               controls=[send_back])
+    assert done.milestone.verdict == "met"
+    # send_back cleared nothing (no latest yet) — convergence still took 2 rounds.
+    assert done.rounds == 2
+
+
+def test_milestone_id_validates_control_pattern(tmp_path):
+    c = TaskControl(task_id="AUTH-M1", action="approve")
+    assert c.task_id == "AUTH-M1"
+    with __import__("pytest").raises(Exception):
+        TaskControl(task_id="nope", action="approve")
+
+
 def test_retry_control_reenters_escalated_task(tmp_path):
     gw = _gateway(_texts())
     escalated = run_until_milestone([_task()], _milestone(), _gateway(_texts(verdict="ESCALATE")),

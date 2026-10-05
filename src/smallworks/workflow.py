@@ -273,11 +273,22 @@ def run_until_milestone(
     round_no = 0
     while True:
         for control in [c for c in pending_controls if isinstance(c, TaskControl)]:
-            if control.action == "cancel":
+            if control.action == "cancel" and (
+                control.task_id == current.milestone_id or control.task_id in latest
+            ):
                 current.verdict = "breached"
                 return MilestoneResult(current, round_no, history)
             if control.action == "retry" and control.task_id in latest:
                 del latest[control.task_id]
+            if control.action == "approve" and control.task_id == current.milestone_id:
+                current.verdict = "met"
+                return MilestoneResult(current, round_no, history)
+            if control.action == "reject" and control.task_id == current.milestone_id:
+                current.verdict = "breached"
+                return MilestoneResult(current, round_no, history)
+            if control.action == "send_back" and control.task_id == current.milestone_id:
+                # Human returns scope to the Engineer: re-drive every task fresh.
+                latest.clear()
         pending_controls = [c for c in pending_controls if not isinstance(c, TaskControl)]
         if round_no >= current.max_rounds:
             current.verdict = "breached"
