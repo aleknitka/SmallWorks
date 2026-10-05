@@ -361,6 +361,10 @@ def run_until_milestone(
     latest: dict[str, TaskResult] = {}
     history: list[list[TaskResult]] = []
     round_no = 0
+    def snap() -> None:
+        if on_round is not None:
+            on_round(milestone_view(tasks, current, latest, history, round_no))
+
     while True:
         if fresh_controls is not None:
             pending_controls.extend(fresh_controls())
@@ -369,14 +373,17 @@ def run_until_milestone(
                 control.task_id == current.milestone_id or control.task_id in latest
             ):
                 current.verdict = "breached"
+                snap()
                 return MilestoneResult(current, round_no, history)
             if control.action == "retry" and control.task_id in latest:
                 del latest[control.task_id]
             if control.action == "approve" and control.task_id == current.milestone_id:
                 current.verdict = "met"
+                snap()
                 return MilestoneResult(current, round_no, history)
             if control.action == "reject" and control.task_id == current.milestone_id:
                 current.verdict = "breached"
+                snap()
                 return MilestoneResult(current, round_no, history)
             if control.action == "send_back" and control.task_id == current.milestone_id:
                 # Human returns scope to the Engineer: re-drive every task fresh.
@@ -385,11 +392,13 @@ def run_until_milestone(
         if round_no >= current.max_rounds:
             current.verdict = "breached"
             log.debug("milestone breached: max_rounds spent ({})", current.max_rounds)
+            snap()
             return MilestoneResult(current, round_no, history)
         round_no += 1
         unfinished = [t for t in tasks if t.task_id not in latest or latest[t.task_id].decision.action != "pass"]
         if not unfinished:
             current = validate_milestone(current, {tid: r.decision for tid, r in latest.items()})
+            snap()
             return MilestoneResult(current, round_no - 1, history)
         log.debug("milestone round {}/{} tasks={}", round_no, current.max_rounds, [t.task_id for t in unfinished])
         # Full graph each round so wave logic unlocks dependents of newly-passing
@@ -403,8 +412,7 @@ def run_until_milestone(
         for r in round_results:
             latest[r.task_id] = r
         current = validate_milestone(current, {tid: r.decision for tid, r in latest.items()})
-        if on_round is not None:
-            on_round(milestone_view(tasks, current, latest, history, round_no))
+        snap()
         log.debug("milestone round {} verdict={}", round_no, current.verdict)
         if current.verdict in ("met", "breached"):
             return MilestoneResult(current, round_no, history)
