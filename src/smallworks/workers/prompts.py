@@ -38,6 +38,9 @@ def engineer_prompt(module: ModuleSpec) -> str:
         "RETRY-1 is invalid); each task touches 1-2 files under src/smallworks/; "
         "allowed_files MUST be concrete paths; acceptance_criteria MUST be executable checks. "
         "Do NOT redesign the CONTRACT: task behaviour MUST call the interface as specified. "
+        "Every task MUST include its test file in allowed_files "
+        "(tests/test_<module>.py, created or extended) — a task with no runnable "
+        "tests can never pass verification. "
         f"{JSON_ONLY} Shape: "
         '{"tasks": [{"task_id": "RETRY-001", "module": "<name>", "behaviour": "...", '
         '"allowed_files": ["src/..."], "acceptance_criteria": ["..."]}]}.'
