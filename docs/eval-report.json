@@ -1,0 +1,54 @@
+{
+  "report": {
+    "metrics": [
+      "completion",
+      "tests_passed",
+      "retries",
+      "human_interventions",
+      "regressions",
+      "total_tokens",
+      "wallclock_s",
+      "gpu_s",
+      "api_cost",
+      "context_chars",
+      "escalations"
+    ],
+    "baseline": {
+      "arm": "baseline",
+      "completion": "2/2",
+      "tests_passed": "8/8",
+      "retries": 0,
+      "human_interventions": 0,
+      "regressions": 0,
+      "total_tokens": 260,
+      "wallclock_s": 0.0,
+      "gpu_s": 0.0,
+      "api_cost": 0.002,
+      "context_chars": 100043,
+      "escalations": 0
+    },
+    "smallworks": {
+      "arm": "smallworks",
+      "completion": "2/2",
+      "tests_passed": "8/8",
+      "retries": 0,
+      "human_interventions": 0,
+      "regressions": 0,
+      "total_tokens": 1040,
+      "wallclock_s": 0.04,
+      "gpu_s": 60.0,
+      "api_cost": 0.008,
+      "context_chars": 16000,
+      "escalations": 0
+    },
+    "hypothesis": "frontier-led + self-hosted execution beats one frontier model on quality per cost/time",
+    "verdict": "SUPPORTED"
+  },
+  "raw_outputs": {
+    "engineer": "{\"tasks\": []}",
+    "developer": "{\"files_changed\": [\"src/auth/token.py\"], \"summary\": \"eval fix\"}",
+    "tester": "{\"passed\": true, \"tests_run\": 4, \"tests_failed\": 0}",
+    "reviewer": "{\"verdict\": \"PASS\", \"notes\": \"eval\"}",
+    "writer": "eval docs."
+  }
+}
