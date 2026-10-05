@@ -70,7 +70,13 @@ def test_providers_status_masks_keys():
     assert {"ollama", "github", "openai"} <= names
     for p in res.json()["providers"]:
         assert "api_key" not in p and "key_set" in p  # presence only, never values
-    assert any(p["key_required"] for p in res.json()["providers"] if p["name"] == "github")
+    assert any(p["needs_key"] for p in res.json()["providers"] if p["name"] == "github")
+
+
+def test_providers_first_row_is_configured_slot():
+    rows = client.get("/api/providers").json()["providers"]
+    assert rows[0]["configured"] is True  # one slot ships; the rest wait for [+]
+    assert any(not p["configured"] for p in rows[1:])
 
 
 def test_groups_show_provider_routing():
@@ -82,4 +88,12 @@ def test_groups_show_provider_routing():
 
 def test_put_providers_rejects_unknown():
     res = client.put("/api/providers", json={"providers": {"nope": {"base_url": "http://x"}}})
+    assert res.status_code == 422
+
+
+def test_assign_model_rejected_for_unknown_role():
+    res = client.put(
+        "/api/models/assign",
+        json={"role": "janitor", "provider": "github", "model": "openai/gpt-4o-mini"},
+    )
     assert res.status_code == 422

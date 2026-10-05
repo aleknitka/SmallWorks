@@ -154,26 +154,39 @@ def _read_dotenv_values(path: Path) -> dict[str, str]:
     return load_dotenv(path)
 
 
-def _providers_status() -> list[dict]:
-    """Provider rows: base URL (with override source), key state (never the value), default model."""
-    import os
-
-    from smallworks.config import PROVIDERS_REQUIRING_KEY, load_providers
+def _configured_providers() -> dict:
+    """Explicit slots from providers.yaml (missing file = empty); defaults fill the rest."""
+    from smallworks.config import default_providers, load_providers
 
     try:
-        providers = load_providers(_providers_path())
+        return load_providers(_providers_path())
     except ValueError:
-        from smallworks.config import default_providers
+        return default_providers()
 
-        providers = default_providers()
+
+def _providers_status() -> list[dict]:
+    """Provider rows: base URL (with override source), key state (never the value).
+
+    ``configured`` marks explicit slots in providers.yaml (the ones the page
+    shows as forms); every known vendor is listed so [+] can add it.
+    """
+    import os
+
+    from smallworks.config import KNOWN_PROVIDERS, PROVIDERS_REQUIRING_KEY, default_providers
+
+    explicit = _configured_providers()
+    providers = default_providers()
+    providers.update(explicit)
     file_env = _read_dotenv_values(_dotenv_path())
     rows = []
-    for name in sorted(providers):
+    for name in list(explicit) + [k for k in KNOWN_PROVIDERS if k not in explicit]:
         cfg = providers[name]
         override = os.environ.get(f"{name.upper()}_BASE_URL", "")
         rows.append(
             {
                 "name": name,
+                "configured": name in explicit,
+                "needs_key": name in PROVIDERS_REQUIRING_KEY,
                 "base_url": cfg.base_url,
                 "effective_base_url": override or cfg.base_url,
                 "base_overridden": bool(override),
@@ -181,7 +194,6 @@ def _providers_status() -> list[dict]:
                 "key_source": "env"
                 if cfg.api_key_env and cfg.api_key_env in os.environ
                 else ("dotenv" if cfg.api_key_env and cfg.api_key_env in file_env else "missing"),
-                "key_required": name in PROVIDERS_REQUIRING_KEY,
                 "key_set": bool(
                     cfg.api_key_env
                     and (cfg.api_key_env in os.environ or cfg.api_key_env in file_env)
@@ -208,18 +220,20 @@ def put_providers(body: ProvidersIn) -> dict:
 
     import yaml
 
-    from smallworks.config import load_providers
+    from smallworks.config import KNOWN_PROVIDERS, ProviderConfig, default_providers
 
-    try:
-        current = load_providers(_providers_path())
-    except ValueError:
-        from smallworks.config import default_providers
-
-        current = default_providers()
+    current = _configured_providers()
+    defaults = default_providers()
     for name, update in body.providers.items():
-        if name not in current:
+        if name not in KNOWN_PROVIDERS:
             raise HTTPException(status_code=422, detail=f"unknown provider {name!r}")
-        cfg = current[name]
+        cfg = current.get(name)
+        if cfg is None:  # [+] a new slot: seed from built-in defaults
+            seed = defaults[name]
+            cfg = ProviderConfig(
+                base_url=seed.base_url, api_key_env=seed.api_key_env, default_model=seed.default_model
+            )
+            current[name] = cfg
         if update.base_url:
             cfg.base_url = update.base_url
         if update.api_key_env:
@@ -251,29 +265,90 @@ def put_providers(body: ProvidersIn) -> dict:
     return {"providers": _providers_status()}
 
 
+class AssignmentIn(BaseModel):
+    role: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    endpoint: str = Field(default="", min_length=0)
+    position: str = Field(default="append")
+
+
 @app.get("/api/models/groups")
 def list_model_groups() -> dict:
-    """Role -> group -> deployments (provider/endpoint/model) for the settings UI."""
+    """Role -> deployments (provider/endpoint/model) for the settings UI.
+
+    Groups still exist underneath (fallback order), but the page assigns
+    models to roles directly; each assignment appends a deployment to the
+    role's group (or replaces it when ``position == "only"``).
+    """
     from smallworks.config import load_configs, default_config_dir
 
     cfg = default_config_dir()
     loaded = load_configs(cfg / "models.yaml", cfg / "workers.yaml", cfg / "providers.yaml")
-    return {
-        "roles": loaded.role_mapping(),
-        "groups": {
-            group: [
-                {
-                    "provider": d.provider,
-                    "endpoint": d.endpoint,
-                    "model": d.model,
-                    "params": d.params,
-                    "class": d.model_class,
-                }
-                for d in deployments
-            ]
-            for group, deployments in loaded.models.items()
-        },
-    }
+    groups = {}
+    for group, deployments in loaded.models.items():
+        groups[group] = [
+            {
+                "provider": d.provider,
+                "endpoint": d.endpoint,
+                "model": d.model,
+                "params": d.params,
+                "class": d.model_class,
+            }
+            for d in deployments
+        ]
+    return {"roles": loaded.role_mapping(), "groups": groups}
+
+
+@app.put("/api/models/assign")
+def assign_model(body: AssignmentIn) -> dict:
+    """Assign a provider model to a role: append to (or replace) its group chain.
+
+    ``position``: ``"append"`` (default, extra fallback), ``"prepend"``
+    (try first), ``"only"`` (this model alone). Writes models.yaml.
+    """
+    import yaml
+
+    from smallworks.config import default_config_dir, load_configs
+
+    cfg = default_config_dir()
+    models_path = cfg / "models.yaml"
+    loaded = load_configs(models_path, cfg / "workers.yaml", cfg / "providers.yaml")
+    worker = loaded.workers.get(body.role)
+    if worker is None or not worker.enabled:
+        raise HTTPException(status_code=422, detail=f"unknown role {body.role!r}")
+    if body.position not in ("append", "prepend", "only"):
+        raise HTTPException(status_code=422, detail=f"bad position {body.position!r}")
+    raw = yaml.safe_load(models_path.read_text(encoding="utf-8")) or {}
+    groups = raw.get("models", {})
+    entry: dict = {"provider": body.provider, "model": body.model, "class": "frontier"}
+    if body.endpoint:
+        entry["endpoint"] = body.endpoint
+    chain = groups.get(worker.model_group, [])
+    if body.position == "only":
+        chain = [entry]
+    elif body.position == "prepend":
+        chain = [entry] + [d for d in chain if not _same_deployment(d, body)]
+    else:
+        chain = [d for d in chain if not _same_deployment(d, body)] + [entry]
+    groups[worker.model_group] = chain
+    raw["models"] = groups
+    models_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    logger.bind(component="service", route="assign_model").info(
+        "role {} -> {}:{} ({})", body.role, body.provider, body.model, body.position
+    )
+    return list_model_groups()
+
+
+def _same_deployment(raw_dep: dict, body: AssignmentIn) -> bool:
+    """True when a models.yaml entry already routes this provider+model."""
+    if not isinstance(raw_dep, dict):
+        return False
+    provider = raw_dep.get("provider", "")
+    model = raw_dep.get("model", "")
+    if not provider and "name" in raw_dep:
+        provider, _, model = str(raw_dep["name"]).partition("/")
+    return provider == body.provider and model == body.model
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -170,12 +170,19 @@ def load_providers(path: Path) -> dict[str, ProviderConfig]:
 def load_configs(
     models_path: Path, workers_path: Path, providers_path: Path | None = None
 ) -> LoadedConfig:
-    """Load models + workers (+ providers); fail fast on unknown group/tier."""
+    """Load models + workers (+ providers); fail fast on unknown group/tier/provider.
+
+    ``providers.yaml`` holds explicit slots only (one local slot ships); every
+    other known vendor resolves from built-in defaults until the user adds it
+    via the settings page. Truly unknown provider names still fail fast.
+    """
     models = load_models(models_path)
     workers = load_workers(workers_path, known_groups=set(models))
-    providers = (
+    explicit = (
         load_providers(providers_path) if providers_path is not None else default_providers()
     )
+    providers = default_providers()
+    providers.update(explicit)
     for group, deployments in models.items():
         for dep in deployments:
             if dep.provider not in providers:

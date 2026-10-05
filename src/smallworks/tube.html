@@ -74,6 +74,10 @@
   .prov input::placeholder { color: var(--ph-dim); }
   .prov .save { margin-top: 8px; font: inherit; color: var(--ph); background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 4px 12px; cursor: pointer; }
   .prov .save:hover { box-shadow: var(--glow); border-color: var(--ph); }
+  .prov select { font: inherit; font-size: 12px; color: var(--ph); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; width: 100%; min-width: 0; }
+  .prov .addslot { border: 1px dashed var(--line); border-radius: 4px; padding: 8px; margin-top: 8px; }
+  .prov .assign { border-top: 1px dotted var(--line); margin-top: 8px; padding-top: 8px; }
+  .prov .atitle { font-size: 11px; letter-spacing: 2px; color: var(--ph-dim); margin-bottom: 2px; }
   .route { border-bottom: 1px dotted var(--line); padding: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
   .fxrow { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dotted var(--line); }
   .fxrow:last-child { border-bottom: none; }
@@ -92,7 +96,7 @@
 </header>
 <main>
   <section aria-label="Providers"><h2>Providers</h2>
-    <p class="note">Role → group → provider → endpoint → model. Keys save to <code>.env</code> (gitignored), never to YAML.</p>
+    <p class="note">One slot ships (local). [+] adds a vendor; each model assigns to roles. Keys save to <code>.env</code> (gitignored), never to YAML.</p>
     <div id="provList"></div>
   </section>
   <section aria-label="Routing"><h2>Routing</h2><div id="routeList"></div></section>
@@ -133,43 +137,94 @@ function renderFx() {
     div.append(nm, st, btn); box.appendChild(div); paint();
   }
 }
+const ROLES = ["orchestrator", "engineer", "developer", "tester", "reviewer"];
+let PROVIDERS = [];
 async function loadProviders() {
   const box = $("provList"); box.innerHTML = "";
   let data; try { data = await (await fetch("/api/providers")).json(); } catch { box.textContent = "OFFLINE"; return; }
-  for (const p of data.providers) {
-    const div = document.createElement("div"); div.className = "prov";
-    const top = document.createElement("div"); top.className = "top";
-    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = p.name.toUpperCase();
-    const key = document.createElement("span"); key.className = "key" + (p.key_set ? " set" : "");
-    key.textContent = p.key_set ? `KEY:${p.key_source}` : (p.key_required ? "KEY:MISSING" : "KEY:--");
-    top.append(nm, key); div.appendChild(top);
-    const fields = [
-      ["base_url", "ENDPOINT", p.effective_base_url, "base URL for chat/completions"],
-      ["api_key", "API KEY", "", p.api_key_env ? `new key for ${p.api_key_env} (blank = keep)` : "no key needed (local)"],
-      ["default_model", "MODEL", p.default_model, "default model id"],
-    ];
-    const inputs = {};
-    for (const [f, label, val, ph] of fields) {
-      const lab = document.createElement("label"); lab.className = "plab"; lab.textContent = label;
-      const inp = document.createElement("input");
-      inp.value = f === "api_key" ? "" : val; inp.placeholder = ph;
-      if (f === "api_key") inp.type = "password";
-      if (f === "api_key" && !p.api_key_env) inp.disabled = true;
-      inputs[f] = inp; lab.appendChild(inp); div.appendChild(lab);
+  PROVIDERS = data.providers;
+  const configured = PROVIDERS.filter(p => p.configured);
+  const pending = PROVIDERS.filter(p => !p.configured);
+  for (const p of configured) box.appendChild(providerCard(p, false));
+  // One [+] slot: pick an unconfigured vendor to add a new provider form.
+  if (pending.length) {
+    const add = document.createElement("div"); add.className = "prov addslot";
+    const lab = document.createElement("label"); lab.className = "plab"; lab.textContent = "ADD";
+    const sel = document.createElement("select");
+    for (const p of pending) {
+      const opt = document.createElement("option"); opt.value = p.name; opt.textContent = p.name.toUpperCase();
+      sel.appendChild(opt);
     }
-    const save = document.createElement("button"); save.className = "save"; save.type = "button"; save.textContent = "SAVE";
-    save.onclick = async () => {
-      save.textContent = "SAVING...";
-      const body = { providers: { [p.name]: { base_url: inputs.base_url.value } } };
-      if (inputs.api_key.value) body.providers[p.name].api_key = inputs.api_key.value;
-      if (inputs.default_model.value !== p.default_model) body.providers[p.name].default_model = inputs.default_model.value;
-      const res = await fetch("/api/providers", { method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
-      save.textContent = res.ok ? "SEALED" : "FAILED";
-      setTimeout(() => { save.textContent = "SAVE"; }, 1500);
-      if (res.ok) loadProviders();
+    lab.appendChild(sel); add.appendChild(lab);
+    const btn = document.createElement("button"); btn.className = "save"; btn.type = "button"; btn.textContent = "[+]";
+    btn.setAttribute("aria-label", "Add provider slot");
+    btn.onclick = () => {
+      const seeded = PROVIDERS.find(p => p.name === sel.value);
+      box.insertBefore(providerCard(seeded, true), add);
+      btn.disabled = true;
     };
-    div.appendChild(save); box.appendChild(div);
+    add.appendChild(btn); box.appendChild(add);
   }
+}
+function providerCard(p, isNew) {
+  const div = document.createElement("div"); div.className = "prov";
+  const top = document.createElement("div"); top.className = "top";
+  const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = p.name.toUpperCase() + (isNew ? " (NEW)" : "");
+  const key = document.createElement("span"); key.className = "key" + (p.key_set ? " set" : "");
+  key.textContent = p.key_set ? `KEY:${p.key_source}` : (p.needs_key ? "KEY:MISSING" : "KEY:--");
+  top.append(nm, key); div.appendChild(top);
+  const inputs = {};
+  const mkField = (f, label, val, ph, type) => {
+    const lab = document.createElement("label"); lab.className = "plab"; lab.textContent = label;
+    const inp = document.createElement("input");
+    inp.value = val; inp.placeholder = ph; if (type) inp.type = type;
+    inputs[f] = inp; lab.appendChild(inp); div.appendChild(lab);
+  };
+  mkField("base_url", "ENDPOINT", p.effective_base_url, "base URL for chat/completions");
+  mkField("api_key", "API KEY", "", p.api_key_env ? `new key for ${p.api_key_env} (blank = keep)` : "no key needed (local)", "password");
+  if (!p.api_key_env && !p.needs_key) inputs.api_key.disabled = true;
+  mkField("default_model", "MODEL", p.default_model, "default model id");
+  const save = document.createElement("button"); save.className = "save"; save.type = "button"; save.textContent = "SAVE";
+  save.onclick = async () => {
+    save.textContent = "SAVING...";
+    const body = { providers: { [p.name]: { base_url: inputs.base_url.value } } };
+    if (inputs.api_key.value) body.providers[p.name].api_key = inputs.api_key.value;
+    if (inputs.default_model.value !== p.default_model) body.providers[p.name].default_model = inputs.default_model.value;
+    const res = await fetch("/api/providers", { method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+    save.textContent = res.ok ? "SEALED" : "FAILED";
+    setTimeout(() => { save.textContent = "SAVE"; }, 1500);
+    if (res.ok) { loadProviders(); loadRouting(); }
+  };
+  div.appendChild(save);
+  // Per-model role assignment: model id + role + position, appended to the
+  // role's fallback chain (or replacing it with ONLY).
+  const asg = document.createElement("div"); asg.className = "assign";
+  const t = document.createElement("div"); t.className = "atitle"; t.textContent = "ASSIGN MODEL TO ROLE"; asg.appendChild(t);
+  const mRow = document.createElement("label"); mRow.className = "plab"; mRow.textContent = "MODEL";
+  const mInp = document.createElement("input"); mInp.placeholder = p.default_model || "model id, e.g. openai/gpt-4o-mini";
+  mRow.appendChild(mInp); asg.appendChild(mRow);
+  const rRow = document.createElement("label"); rRow.className = "plab"; rRow.textContent = "ROLE";
+  const rSel = document.createElement("select");
+  for (const r of ROLES) { const o = document.createElement("option"); o.value = r; o.textContent = r; rSel.appendChild(o); }
+  rRow.appendChild(rSel); asg.appendChild(rRow);
+  const pRow = document.createElement("label"); pRow.className = "plab"; pRow.textContent = "AS";
+  const pSel = document.createElement("select");
+  for (const [v, l] of [["append", "EXTRA"], ["prepend", "FIRST"], ["only", "ONLY"]]) {
+    const o = document.createElement("option"); o.value = v; o.textContent = l; pSel.appendChild(o);
+  }
+  pRow.appendChild(pSel); asg.appendChild(pRow);
+  const go = document.createElement("button"); go.className = "save"; go.type = "button"; go.textContent = "ASSIGN";
+  go.onclick = async () => {
+    if (!mInp.value.trim()) { go.textContent = "NEED MODEL"; setTimeout(() => { go.textContent = "ASSIGN"; }, 1500); return; }
+    go.textContent = "SAVING...";
+    const res = await fetch("/api/models/assign", { method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ role: rSel.value, provider: p.name, model: mInp.value.trim(), position: pSel.value }) });
+    go.textContent = res.ok ? "SEALED" : "FAILED";
+    setTimeout(() => { go.textContent = "ASSIGN"; }, 1500);
+    if (res.ok) { mInp.value = ""; loadRouting(); }
+  };
+  asg.appendChild(go); div.appendChild(asg);
+  return div;
 }
 async function loadRouting() {
   const box = $("routeList"); box.innerHTML = "";
