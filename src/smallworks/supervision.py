@@ -92,6 +92,7 @@ def board_record(
         role=role,
         model=model,
         dependencies=list(task.depends_on),
+        attempt=attempt,
         test_status=test_status,
         latest_report=latest,
         artefacts=artefacts,
