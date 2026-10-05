@@ -39,6 +39,7 @@ def developer_prompt(
     task: ImplementationTask,
     symbols: list[str] | None = None,
     existing: dict[str, str] | None = None,
+    feedback: str | None = None,
 ) -> str:
     """Context Packet for the developer: goal + contract + symbols + tests + rules.
 
@@ -63,6 +64,12 @@ def developer_prompt(
         '"contents": {"<path>": "<COMPLETE new file text>"}}. '
         "contents MUST hold every changed file in full; an unwritten file fails verification.\n"
         f"FILES (HEAD content — edit from this, keep unrelated code intact):\n{files}"
+        + (
+            f"\nREVISE: your previous attempt failed verification with this measured result:\n{feedback}\n"
+            "Fix ONLY what the failure names; keep everything that passed intact. "
+            "Emit the COMPLETE corrected files again."
+            if feedback else ""
+        )
     )
 
 

@@ -198,3 +198,57 @@ def test_temperature_zero_reaches_wire_payload():
     except RuntimeError:
         pass
     assert seen.get("temperature") == 0
+
+
+def test_revise_block_absent_without_feedback():
+    from smallworks.workers.prompts import developer_prompt
+
+    assert "REVISE" not in developer_prompt(_task(), None, {})
+    revised = developer_prompt(_task(), None, {}, "gate decision: retry — boom")
+    assert "REVISE" in revised and "boom" in revised
+
+
+def test_failure_feedback_names_measured_result():
+    from smallworks.schemas import Decision, Patch
+    from smallworks.workflow import _failure_feedback
+
+    fb = _failure_feedback(
+        Patch(task_id="AUTH-017", files_changed=["a.py"], summary="s"),
+        TestReport(task_id="AUTH-017", passed=False, tests_run=2, tests_failed=1),
+        None,
+        Decision(task_id="AUTH-017", action="retry", reason="tests failing"),
+    )
+    assert "run=2 failed=1" in fb and "tests failing" in fb
+
+
+def test_retry_carries_feedback_into_next_prompt():
+    import json
+
+    from smallworks.schemas import ImplementationTask
+    from smallworks.workflow import Workflow
+    from tests_helper import KeyedTransport, RoleGateway, _models, _policy, _workers
+
+    texts = {
+        "engineer": json.dumps({"tasks": []}),
+        "developer": json.dumps({"files_changed": ["a.py"], "summary": "s",
+                                 "contents": {"a.py": "x = 1\n"}}),
+        "tester": json.dumps({"passed": False, "tests_run": 1, "tests_failed": 1}),
+        "reviewer": json.dumps({"verdict": "RETRY", "notes": "red"}),
+        "writer": "docs.",
+    }
+    prompts_seen = []
+    base = KeyedTransport(texts)
+    orig = base.complete
+
+    class SpyTransport(KeyedTransport):
+        def complete(self, deployment, prompt, *, task_id):
+            prompts_seen.append(prompt)
+            return orig(deployment, prompt, task_id=task_id)
+
+    gw = RoleGateway(_models(), _workers(), _policy(), transport=SpyTransport(texts))
+    task = ImplementationTask(task_id="AUTH-017", module="auth", behaviour="b",
+                              allowed_files=["a.py"], acceptance_criteria=["c"])
+    Workflow(gw, max_retries=1).run_task(task)
+    dev_prompts = [x for x in prompts_seen if "GOAL:" in x]
+    assert len(dev_prompts) == 2
+    assert "REVISE" in dev_prompts[1] and "red" in dev_prompts[1]

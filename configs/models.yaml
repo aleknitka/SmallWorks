@@ -48,13 +48,13 @@ models:
     pool_cooldown_s: 60.0
     deployments:
       - provider: ollama
-        model: qwen3.5:latest
-        class: self-hosted
-        params: {temperature: 0, num_predict: 8192, num_ctx: 65536}
-      - provider: ollama
         model: ornith:latest
         class: self-hosted
-        params: {temperature: 0, num_predict: 4096}
+        params: {temperature: 0, num_predict: 8192}
+      - provider: ollama
+        model: qwen3.5:latest
+        class: self-hosted
+        params: {temperature: 0, num_predict: 8192, num_ctx: 16384}
       - provider: ollama
         model: mistral-nemo:12b
         class: self-hosted

@@ -110,6 +110,24 @@ def _apply_patch(task: ImplementationTask, patch: Patch, workdir: object, *, ver
     log.debug("patch applied files={}", patch.files_changed)
 
 
+def _failure_feedback(
+    patch: Patch | None, report: TestReport | None,
+    review: ReviewReport | None, decision: Decision,
+) -> str:
+    """Measured failure for the REVISE block: counts, gate reason, review notes."""
+    lines = [f"gate decision: {decision.action} — {decision.reason}"]
+    if report is not None:
+        lines.append(
+            f"executed tests: run={report.tests_run} failed={report.tests_failed} "
+            f"passed={report.passed}"
+        )
+    if patch is not None:
+        lines.append(f"files you emitted: {', '.join(patch.files_changed)} — {patch.summary}")
+    if review is not None and review.verdict != "PASS":
+        lines.append(f"reviewer ({review.verdict}): {review.notes}")
+    return "\n".join(lines)
+
+
 @dataclass
 class Workflow:
     """Owns one task's gated loop; inject gateway + worktree root for tests."""
@@ -123,6 +141,7 @@ class Workflow:
         log = logger.bind(component="workflow", task_id=task.task_id)
         states: list[str] = [TaskState.REQUEST, TaskState.ENGINEER, TaskState.PLAN]
         attempts = 0
+        feedback: str | None = None
         last_patch: Patch | None = None
         last_report: TestReport | None = None
         last_review: ReviewReport | None = None
@@ -135,9 +154,8 @@ class Workflow:
                     with worktree_for(task.task_id, root=self.worktree_root) as workdir:
                         last_patch = developer_task(
                             task, self.gateway, symbols=symbols,
-                            existing=_read_existing(task, workdir),
+                            existing=_read_existing(task, workdir), feedback=feedback,
                         )
-                        _apply_patch(task, last_patch, workdir, verify=self.verify)
                         states.append(TaskState.TEST)
                         last_report = tester_task(task, last_patch, self.gateway,
                                                   verify=self.verify, root=workdir)
@@ -192,7 +210,9 @@ class Workflow:
                 return TaskResult(task.task_id, TaskOutcome.ESCALATED, attempts,
                                   decision, last_patch, last_report, last_review,
                                   [s.value for s in states])
-            log.debug("retrying task (attempt {}/{})", attempts, self.max_retries + 1)
+            feedback = _failure_feedback(last_patch, last_report, last_review, gated)
+            log.debug("retrying task (attempt {}/{}) feedback_chars={}",
+                      attempts, self.max_retries + 1, len(feedback or ""))
 
 
 def _waves(tasks: list[ImplementationTask]) -> list[list[ImplementationTask]]:
