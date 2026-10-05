@@ -147,7 +147,7 @@
   <section aria-label="Detail"><h2>Detail</h2><dl class="readout" id="detail"><dt>TASK</dt><dd>—</dd></dl></section>
   <section aria-label="Milestones"><h2>Milestones</h2>
     <p class="note">Task graph runs itself until the predicate holds. Click a node for detail; controls queue for the next round.</p>
-    <div class="ctl" style="margin-bottom:8px"><button id="msRun" type="button">RUN DEMO LOOP</button></div>
+    <div class="ctl" style="margin-bottom:8px"><button id="msRun" type="button">RUN DEMO LOOP</button><button id="msLive" type="button">RUN LIVE LOOP</button></div>
     <div id="msList"></div>
   </section>
   <section aria-label="Comms"><h2>Orchestrator chat</h2><div id="chat" aria-live="polite"></div>
@@ -297,7 +297,8 @@ async function loadMilestones() {
     run.dataset.wired = "1";
     run.onclick = async () => {
       run.textContent = "RUNNING...";
-      const started = await fetch("/api/milestones/demo/run", { method: "POST" }).then(r => r.json()).catch(() => null);
+      const live = run.dataset.live === "1";
+      const started = await fetch(live ? "/api/milestones/live/run" : "/api/milestones/demo/run", { method: "POST" }).then(r => r.json()).catch(() => null);
       if (started && started.milestone_id) msId = started.milestone_id;
       run.textContent = "RUN DEMO LOOP";
       msPoll();
@@ -317,6 +318,11 @@ async function loadMilestones() {
     bar.appendChild(b);
   }
   box.appendChild(bar);
+  const liveBtn = $("msLive");
+  if (liveBtn && !liveBtn.dataset.wired) {
+    liveBtn.dataset.wired = "1";
+    liveBtn.onclick = () => { run.dataset.live = "1"; run.textContent = "RUN LIVE LOOP"; msPoll(); };
+  }
   const cur = data.milestones.find(m => m.milestone_id === msId) || data.milestones[0];
   box.appendChild(milestoneCard(cur));
 }

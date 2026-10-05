@@ -50,16 +50,40 @@ def _ask(gateway: Gateway, role: str, prompt: str, *, task_id: str) -> tuple[str
 
 
 def _parse_json(text: str, *, role: str, task_id: str) -> dict:
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        logger.bind(component="workers", role=role, task_id=task_id).error(
-            "unparseable {} output: {}", role, exc
-        )
-        raise WorkerError(f"{role} returned unparseable JSON") from exc
-    if not isinstance(data, dict):
-        raise WorkerError(f"{role} must return one JSON object")
-    return data
+    """Parse one JSON object, tolerating fences/prose small models wrap it in.
+
+    Tries bare parse, fenced block, then first balanced {...}; downstream
+    schema validation still rejects wrong shapes — this only strips packaging.
+    """
+    log = logger.bind(component="workers", role=role, task_id=task_id)
+    candidates = [text]
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        fenced = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+        candidates.append(fenced)
+    start = text.find("{")
+    if start >= 0:
+        depth, end = 0, -1
+        for i in range(start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if end > start:
+            candidates.append(text[start:end])
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    log.error("unparseable {} output", role)
+    raise WorkerError(f"{role} returned unparseable JSON")
 
 
 def engineer_task(module: ModuleSpec, gateway: Gateway, worker: WorkerConfig) -> list[ImplementationTask]:

@@ -242,6 +242,113 @@ def run_demo_milestone() -> dict:
     return {"milestone_id": milestone_id, "started": True}
 
 
+@app.post("/api/milestones/live/run")
+def run_live_milestone() -> dict:
+    """Real pooled-Ollama loop in a background thread; rounds stream to STORE.
+
+    Two tasks: implement ``slugify`` in ``src/smallworks/textutils.py``, then
+    test it in ``tests/test_textutils.py`` (dependent — wave 2 unlocks on pass).
+    Watch it on the console Milestones column.
+    """
+    import threading
+
+    from smallworks.store import MilestoneView
+
+    milestone_id = "LIVE-M1"
+    STORE.record_milestone(
+        MilestoneView(
+            milestone_id=milestone_id, predicate="all_tasks_pass",
+            verdict="open", rounds=0, max_rounds=4,
+            nodes=[
+                {"task_id": "LIVE-101", "depends_on": [], "wave": 0, "outcome": "pending"},
+                {"task_id": "LIVE-102", "depends_on": ["LIVE-101"], "wave": 1, "outcome": "pending"},
+            ],
+            round_outcomes=[],
+        )
+    )
+    if milestone_id not in _milestone_threads:
+        thread = threading.Thread(target=_run_live_milestone, args=(milestone_id,), daemon=True)
+        _milestone_threads[milestone_id] = thread
+        thread.start()
+    logger.bind(component="service", route="run_live_milestone").info("live loop started")
+    return {"milestone_id": milestone_id, "started": True}
+
+
+def _run_live_milestone(milestone_id: str) -> None:
+    from smallworks.config import FactoryPolicy, default_config_dir, load_configs
+    from smallworks.gateway import Gateway, OpenAICompatibleTransport
+    from smallworks.schemas import ImplementationTask, Milestone
+    from smallworks.store import MilestoneView
+    from smallworks.workflow import run_until_milestone
+
+    import yaml
+
+    cfg = default_config_dir()
+    loaded = load_configs(cfg / "models.yaml", cfg / "workers.yaml", cfg / "providers.yaml")
+    raw = yaml.safe_load((cfg / "factory.yaml").read_text())["factory"]
+    policy = FactoryPolicy.model_validate(
+        {
+            "mode": raw["mode"],
+            "max_retries": 3,
+            "approvals_required": raw["approvals_required"],
+            "max_cost_per_task": raw["budgets"]["max_cost_per_task"],
+            "max_wallclock_minutes": raw["budgets"]["max_wallclock_minutes"],
+        }
+    )
+    gw = Gateway(
+        loaded.models, dict(loaded.workers), policy,
+        transport=OpenAICompatibleTransport(timeout_s=300.0), groups=loaded.groups,
+    )
+    tasks = [
+        ImplementationTask(
+            task_id="LIVE-101", module="textutils",
+            behaviour="add a slugify(text) helper returning lowercase dash-joined words",
+            allowed_files=["src/smallworks/textutils.py"],
+            acceptance_criteria=["slugify('Hello World!') returns 'hello-world'"],
+        ),
+        ImplementationTask(
+            task_id="LIVE-102", module="textutils",
+            behaviour="add unit tests for slugify covering spaces, punctuation and empty string",
+            allowed_files=["tests/test_textutils.py"],
+            acceptance_criteria=["pytest tests/test_textutils.py passes"],
+            depends_on=["LIVE-101"],
+        ),
+    ]
+    ms = Milestone(
+        milestone_id=milestone_id, engineering_plan="plan-live",
+        predicate="all_tasks_pass", tasks=[t.task_id for t in tasks], max_rounds=4,
+    )
+
+    def on_round(view: dict) -> None:
+        STORE.record_milestone(MilestoneView.model_validate(view))
+
+    log = logger.bind(component="service", milestone_id=milestone_id)
+    log.info("live thread: loading configs")
+    try:
+        run_until_milestone(
+            tasks, ms, gw, max_retries=1, max_workers=1,
+            on_round=on_round, fresh_controls=lambda: pop_milestone_controls(milestone_id),
+        )
+    except Exception:
+        log.opt(exception=True).error("live thread failed")
+        STORE.record_milestone(
+            MilestoneView(
+                milestone_id=milestone_id, predicate="all_tasks_pass",
+                verdict="breached", rounds=0, max_rounds=4,
+                nodes=[
+                    {"task_id": "LIVE-101", "depends_on": [], "wave": 0,
+                     "outcome": "escalated", "action": "escalate",
+                     "reason": "live thread crashed — see server log"},
+                    {"task_id": "LIVE-102", "depends_on": ["LIVE-101"], "wave": 1,
+                     "outcome": "pending"},
+                ],
+                round_outcomes=[],
+            )
+        )
+    finally:
+        _milestone_threads.pop(milestone_id, None)
+
+
 @app.get("/api/tasks/{task_id}/cost")
 def get_cost(task_id: str) -> dict:
     cost, inp, out = STORE.cost_for_task(task_id)
