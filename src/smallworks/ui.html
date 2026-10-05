@@ -8,6 +8,7 @@
     --bg: #0a0a0a; --bg2: #0d120f; --ph: #00ff7a; --ph-dim: #3e6a57;
     --amber: #ffb000; --red: #ff2b2b; --ink: #c6ffdf;
     --line: rgba(0,255,122,.18); --glow: 0 0 14px rgba(0,255,122,.08);
+    --ts: 0 0 6px rgba(0,255,122,.35);
     --scan: rgba(0,255,122,.045); --vig: rgba(0,0,0,.55);
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   }
@@ -15,7 +16,7 @@
     --bg: #e8e4d8; --bg2: #dfdacd; --ph: #0b5c36; --ph-dim: #7a8a7e;
     --amber: #8a5a00; --red: #a31212; --ink: #0a1f14;
     --line: rgba(11,92,54,.28); --glow: 0 0 0 rgba(0,0,0,0);
-    --scan: rgba(11,92,54,.03); --vig: rgba(90,80,50,.25);
+    --ts: none;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -25,14 +26,26 @@
     margin: 0; padding: 12px; display: flex; flex-direction: column; gap: 10px;
     min-height: 100vh;
   }
-  /* CRT tube: scanlines + phosphor bloom + vignette */
+  /* CRT tube: scanlines + aperture grille + bloom + vignette + flicker + sweep */
   body::after {
     content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
     background:
+      repeating-linear-gradient(to right, rgba(0,0,0,.11) 0 1px, transparent 1px 3px),
       repeating-linear-gradient(to bottom, var(--scan) 0 1px, transparent 1px 4px),
       radial-gradient(120% 85% at 50% 0%, var(--scan), transparent 65%),
       radial-gradient(120% 110% at 50% 100%, var(--vig), transparent 60%);
   }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 51;
+    background: linear-gradient(transparent 0%, var(--scan) 48%, rgba(255,255,255,.05) 50%, var(--scan) 52%, transparent 100%);
+    background-size: 100% 220px; background-repeat: repeat-y;
+    animation: sweep 9s linear infinite; opacity: .5;
+  }
+  @keyframes sweep { from { background-position: 0 -220px; } to { background-position: 0 220px; } }
+  @keyframes flick { 0%,100% { opacity: 1; } 97% { opacity: 1; } 98% { opacity: .86; } 99% { opacity: 1; } }
+  main, #lower, header, footer { animation: flick 7s steps(1) infinite; }
+  body { text-shadow: var(--ts); }
+  #runsList li.sel, #chat p:last-child, .key.armed { text-shadow: var(--ts); }
   h1, h2 { font-size: 13px; letter-spacing: 2px; margin: 0 0 8px; text-transform: uppercase; }
   h2 { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
   header, footer, section {
@@ -88,6 +101,11 @@
     font: inherit; color: var(--amber); background: transparent;
     border: none; border-top: 1px solid var(--line); width: 100%;
     padding: 6px; cursor: pointer; text-align: left;
+  }
+  @media (max-width: 900px) { main, #lower { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; animation: none !important; }
+    body::before { display: none; }
   }
 </style>
 <header>
