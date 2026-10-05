@@ -130,3 +130,9 @@ def run_events(run_id: str):
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return (Path(__file__).parent / "ui.html").read_text(encoding="utf-8")
+
+
+@app.get("/tube", response_class=HTMLResponse)
+def tube() -> str:
+    """Tube settings page: effect toggles + display (shares localStorage keys)."""
+    return (Path(__file__).parent / "tube.html").read_text(encoding="utf-8")

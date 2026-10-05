@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en" data-scheme="dark">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SmallWorks // Tube Settings</title>
+<style>
+  :root, :root[data-scheme="dark"] {
+    --bg: #0a0a0a; --bg2: #0d120f; --ph: #00ff7a; --ph-dim: #3e6a57;
+    --amber: #ffb000; --red: #ff2b2b; --ink: #c6ffdf;
+    --line: rgba(0,255,122,.18); --glow: 0 0 14px rgba(0,255,122,.08);
+    --ts: 0 0 6px rgba(0,255,122,.35);
+    --scan: rgba(0,255,122,.045); --vig: rgba(0,0,0,.55);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  :root[data-scheme="light"] {
+    --bg: #e8e4d8; --bg2: #dfdacd; --ph: #0b5c36; --ph-dim: #7a8a7e;
+    --amber: #8a5a00; --red: #a31212; --ink: #0a1f14;
+    --line: rgba(11,92,54,.28); --glow: 0 0 0 rgba(0,0,0,0);
+    --ts: none;
+    --scan: rgba(11,92,54,.03); --vig: rgba(90,80,50,.25);
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: var(--mono); font-size: 13px; line-height: 1.45;
+    letter-spacing: .2px; background: var(--bg); color: var(--ph);
+    margin: 0; padding: 12px; display: flex; flex-direction: column; gap: 10px;
+    min-height: 100vh; text-shadow: var(--ts);
+  }
+  /* Same tube as the console: scanlines + grille + bloom + vignette + sweep + flicker */
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background:
+      repeating-linear-gradient(to right, rgba(0,0,0,.11) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(to bottom, var(--scan) 0 1px, transparent 1px 4px),
+      radial-gradient(120% 85% at 50% 0%, var(--scan), transparent 65%),
+      radial-gradient(120% 110% at 50% 100%, var(--vig), transparent 60%);
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 51;
+    background: linear-gradient(transparent 0%, var(--scan) 48%, rgba(255,255,255,.05) 50%, var(--scan) 52%, transparent 100%);
+    background-size: 100% 220px; background-repeat: repeat-y;
+    animation: sweep 9s linear infinite; opacity: .5;
+  }
+  @keyframes sweep { from { background-position: 0 -220px; } to { background-position: 0 220px; } }
+  @keyframes flick { 0%,100% { opacity: 1; } 97% { opacity: 1; } 98% { opacity: .86; } 99% { opacity: 1; } }
+  main { animation: flick 7s steps(1) infinite; }
+  html[data-fx-scan="off"] body::after { display: none; }
+  html[data-fx-sweep="off"] body::before { display: none; }
+  html[data-fx-flick="off"] main { animation: none; }
+  html[data-fx-glow="off"] body { text-shadow: none; }
+  h2 { font-size: 13px; letter-spacing: 2px; margin: 0 0 8px; text-transform: uppercase; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  header, section {
+    border: 1px solid var(--line); background: var(--bg2);
+    padding: 10px 12px; border-radius: 8px;
+  }
+  header { display: flex; gap: 16px; align-items: center; }
+  header .wordmark { color: var(--ink); font-weight: 700; }
+  header nav { flex: 1; display: flex; gap: 8px; }
+  header nav a, header button { font: inherit; color: var(--ph); text-decoration: none; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  header nav a:hover, header button:hover { box-shadow: var(--glow); border-color: var(--ph); }
+  header nav a[aria-current="page"] { color: var(--ink); border-color: var(--ph); }
+  :focus-visible { outline: 2px solid var(--ph); outline-offset: 2px; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+  .fxrow { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dotted var(--line); }
+  .fxrow:last-child { border-bottom: none; }
+  .fxrow .nm { flex: 1; }
+  .fxrow .hint { display: block; color: var(--ph-dim); font-size: 11px; }
+  .fxrow .st { color: var(--ph-dim); min-width: 3em; text-align: right; }
+  .fxrow .st.on { color: var(--ph); }
+  .fxrow button { font: inherit; color: var(--ph); background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer; min-width: 4em; }
+  .fxrow button:hover { box-shadow: var(--glow); border-color: var(--ph); }
+  .fxrow button[aria-pressed="false"] { color: var(--ph-dim); }
+  footer { text-align: center; color: var(--ph-dim); letter-spacing: 4px; font-size: 11px; border: 1px solid var(--line); background: var(--bg2); padding: 10px; border-radius: 8px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; animation: none !important; }
+    body::before { display: none; }
+  }
+</style>
+<header>
+  <span class="wordmark">SMALLWORKS // MU-TH-UR 6000</span>
+  <nav><a href="/">CONSOLE</a><a href="/tube" aria-current="page">TUBE</a></nav>
+  <button id="schemeBtn" type="button" aria-label="Toggle colour scheme">SCHEME: DARK</button>
+</header>
+<main>
+  <section aria-label="Tube effects"><h2>Tube effects</h2><div id="fxList"></div></section>
+  <section aria-label="Display"><h2>Display</h2><div id="schemeList"></div></section>
+</main>
+<footer>BUILDING BETTER WORLDS</footer>
+<script>
+const $ = id => document.getElementById(id);
+// Only effects that actually ship in the CSS overlay above. Adding a new CRT
+// layer? Add its style rule, its data-fx gate, and one row here — nothing else.
+const FX = [
+  ["scan", "SCANLINES + GRILLE", "body::after overlay: 1px scanlines + vertical aperture grille + bloom + vignette", true],
+  ["sweep", "REFRESH SWEEP", "body::before band drifting down the tube, 9s loop", true],
+  ["flick", "PHOSPHOR FLICKER", "7s brightness dip across the shell", true],
+  ["glow", "TEXT BLOOM", "text-shadow phosphor glow on body copy", true],
+  ["boot", "BOOT SEQUENCE", "staged SYS.CHECK lines on console load", true],
+];
+function fxGet(k, fb) { try { const v = localStorage.getItem("sw-fx-" + k); return v === null ? fb : v === "on"; } catch { return fb; } }
+function fxApply(k, on) {
+  document.documentElement.dataset["fx" + k[0].toUpperCase() + k.slice(1)] = on ? "on" : "off";
+  try { localStorage.setItem("sw-fx-" + k, on ? "on" : "off"); } catch {}
+}
+function renderFx() {
+  const box = $("fxList"); box.innerHTML = "";
+  for (const [k, label, hint, fb] of FX) {
+    const div = document.createElement("div"); div.className = "fxrow";
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = label;
+    const h = document.createElement("span"); h.className = "hint"; h.textContent = hint; nm.appendChild(h);
+    const st = document.createElement("span"); st.className = "st";
+    const btn = document.createElement("button"); btn.type = "button"; btn.setAttribute("aria-label", "Toggle " + label);
+    const paint = () => {
+      const on = fxGet(k, fb);
+      st.textContent = on ? "ON" : "OFF"; st.classList.toggle("on", on);
+      btn.textContent = on ? "[X]" : "[ ]"; btn.setAttribute("aria-pressed", String(on));
+    };
+    btn.onclick = () => { fxApply(k, !fxGet(k, fb)); paint(); };
+    div.append(nm, st, btn); box.appendChild(div); paint();
+  }
+}
+function setScheme(mode) {
+  document.documentElement.dataset.scheme = mode;
+  try { localStorage.setItem("sw-scheme", mode); } catch {}
+  $("schemeBtn").textContent = `SCHEME: ${mode.toUpperCase()}`;
+  paintScheme();
+}
+function paintScheme() {
+  const box = $("schemeList"); box.innerHTML = "";
+  const dark = document.documentElement.dataset.scheme !== "light";
+  for (const [mode, hint] of [["dark", "Nostromo bridge: phosphor on hull black"], ["light", "Weyland day-shift: dark ink on deck paper"]]) {
+    const div = document.createElement("div"); div.className = "fxrow";
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = "COLOUR " + mode.toUpperCase();
+    const h = document.createElement("span"); h.className = "hint"; h.textContent = hint; nm.appendChild(h);
+    const st = document.createElement("span"); st.className = "st";
+    const active = (mode === "dark") === dark;
+    st.textContent = active ? "ON" : "OFF"; st.classList.toggle("on", active);
+    const btn = document.createElement("button"); btn.type = "button";
+    btn.textContent = active ? "[X]" : "[ ]"; btn.setAttribute("aria-pressed", String(active));
+    btn.setAttribute("aria-label", "Use " + mode + " scheme");
+    btn.onclick = () => setScheme(mode);
+    div.append(nm, st, btn); box.appendChild(div);
+  }
+}
+$("schemeBtn").onclick = () => setScheme(document.documentElement.dataset.scheme === "dark" ? "light" : "dark");
+try { const s = localStorage.getItem("sw-scheme"); if (s === "light" || s === "dark") setScheme(s); } catch {}
+try { const q = new URLSearchParams(location.search).get("scheme"); if (q === "light" || q === "dark") setScheme(q); } catch {}
+for (const [k, , , fb] of FX) fxApply(k, fxGet(k, fb));
+renderFx(); paintScheme();
+</script>
+</html>

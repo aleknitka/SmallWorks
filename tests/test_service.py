@@ -54,3 +54,10 @@ def test_index_serves_ui():
     res = client.get("/")
     assert res.status_code == 200
     assert "Orchestrator chat" in res.text
+
+
+def test_tube_serves_settings():
+    res = client.get("/tube")
+    assert res.status_code == 200
+    assert "Tube effects" in res.text and "SCANLINES" in res.text
+    assert "sw-fx-" in res.text  # shares toggle keys with the console

@@ -42,19 +42,6 @@
   html[data-fx-glow="off"] body { text-shadow: none; }
   html[data-fx-glow="off"] #runsList li.sel, html[data-fx-glow="off"] #chat p:last-child,
   html[data-fx-glow="off"] .key.armed { text-shadow: none; }
-  #tube { display: flex; flex-direction: column; gap: 6px; }
-  .fxrow { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-bottom: 1px dotted var(--line); }
-  .fxrow:last-child { border-bottom: none; }
-  .fxrow .nm { flex: 1; }
-  .fxrow .st { color: var(--ph-dim); min-width: 3em; text-align: right; }
-  .fxrow .st.on { color: var(--ph); }
-  .fxrow button {
-    font: inherit; color: var(--ph); background: transparent;
-    border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer;
-    min-width: 4em;
-  }
-  .fxrow button:hover { box-shadow: var(--glow); border-color: var(--ph); }
-  .fxrow button[aria-pressed="false"] { color: var(--ph-dim); }
   h1, h2 { font-size: 13px; letter-spacing: 2px; margin: 0 0 8px; text-transform: uppercase; }
   h2 { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
   header, footer, section {
@@ -65,6 +52,10 @@
   header .wordmark { color: var(--ink); font-weight: 700; }
   header #boot { flex: 1; color: var(--ph-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   header button, .key { cursor: pointer; }
+  header nav { display: flex; gap: 8px; }
+  header nav a { font: inherit; color: var(--ph); text-decoration: none; border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; }
+  header nav a:hover { box-shadow: var(--glow); border-color: var(--ph); }
+  header nav a[aria-current="page"] { color: var(--ink); border-color: var(--ph); }
   #schemeBtn {
     font: inherit; color: var(--ph); background: transparent;
     border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px;
@@ -72,8 +63,7 @@
   #schemeBtn:hover { box-shadow: var(--glow); border-color: var(--ph); }
   :focus-visible { outline: 2px solid var(--ph); outline-offset: 2px; }
   main { flex: 1; display: grid; grid-template-columns: 250px 1fr 330px; gap: 10px; min-height: 0; }
-  #lower { display: grid; grid-template-columns: 330px 280px 1fr; gap: 10px; }
-  section { min-height: 0; overflow: auto; }
+  #lower { display: grid; grid-template-columns: 330px 1fr; gap: 10px; }
   #runsList { list-style: none; margin: 0; padding: 0; }
   #runsList li {
     padding: 6px 8px; border: 1px solid transparent; border-radius: 4px;
@@ -121,6 +111,7 @@
   <span class="wordmark">SMALLWORKS // MU-TH-UR 6000</span>
   <span id="boot">STANDBY</span>
   <span id="pwr">PWR: NOMINAL</span>
+  <nav><a href="/" aria-current="page">CONSOLE</a><a href="/tube">TUBE</a></nav>
   <button id="schemeBtn" type="button" aria-label="Toggle colour scheme">SCHEME: DARK</button>
 </header>
 <main>
@@ -139,7 +130,6 @@
     <button class="key" data-a="approve" data-n="SEAL" data-when="gate">SEAL</button>
     <button class="key" data-a="reject" data-n="REJECT" data-when="gate">REJECT</button>
   </div></section>
-  <section aria-label="Tube settings" id="tube"><h2>Tube</h2><div id="fxList"></div></section>
   <section aria-label="Logs"><h2>Logs</h2><div id="logs"></div></section>
 </div>
 <footer>BUILDING BETTER WORLDS</footer>
@@ -266,33 +256,12 @@ function setScheme(mode) {
   try { localStorage.setItem("sw-scheme", mode); } catch {}
   $("schemeBtn").textContent = `SCHEME: ${mode.toUpperCase()}`;
 }
-const FX = [
-  ["scan", "SCANLINES+GRILLE", true],
-  ["sweep", "REFRESH SWEEP", true],
-  ["flick", "PHOSPHOR FLICKER", true],
-  ["glow", "TEXT BLOOM", true],
-  ["boot", "BOOT SEQUENCE", true],
-];
-function fxGet(k, fb) { try { const v = localStorage.getItem("sw-fx-" + k); return v === null ? fb : v === "on"; } catch { return fb; } }
-function fxSet(k, on) {
-  document.documentElement.dataset["fx" + k[0].toUpperCase() + k.slice(1)] = on ? "on" : "off";
-  try { localStorage.setItem("sw-fx-" + k, on ? "on" : "off"); } catch {}
-}
-function renderFx() {
-  const box = $("fxList"); box.innerHTML = "";
-  for (const [k, label, fb] of FX) {
-    const row = document.createElement("div"); row.className = "fxrow";
-    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = label;
-    const st = document.createElement("span"); st.className = "st";
-    const btn = document.createElement("button"); btn.type = "button";
-    btn.setAttribute("aria-label", "Toggle " + label);
-    const paint = () => {
-      const on = fxGet(k, fb);
-      st.textContent = on ? "ON" : "OFF"; st.classList.toggle("on", on);
-      btn.textContent = on ? "[X]" : "[ ]"; btn.setAttribute("aria-pressed", String(on));
-    };
-    btn.onclick = () => { fxSet(k, !fxGet(k, fb)); paint(); };
-    row.append(nm, st, btn); box.appendChild(row); paint();
+const FX_DEFAULTS = { scan: true, sweep: true, flick: true, glow: true, boot: true };
+function fxGet(k) { try { const v = localStorage.getItem("sw-fx-" + k); return v === null ? FX_DEFAULTS[k] : v === "on"; } catch { return FX_DEFAULTS[k]; } }
+function fxApplyAll() {
+  for (const k of Object.keys(FX_DEFAULTS)) {
+    const on = fxGet(k);
+    document.documentElement.dataset["fx" + k[0].toUpperCase() + k.slice(1)] = on ? "on" : "off";
   }
 }
 $("chatForm").onsubmit = async e => { e.preventDefault(); const el = $("chatIn"); await sendChat(el.value); el.value = ""; };
@@ -304,8 +273,7 @@ document.querySelectorAll("#keybank .key").forEach(k => k.onclick = () => {
 $("schemeBtn").onclick = () => setScheme(document.documentElement.dataset.scheme === "dark" ? "light" : "dark");
 try { const s = localStorage.getItem("sw-scheme"); if (s === "light" || s === "dark") setScheme(s); } catch {}
 try { const q = new URLSearchParams(location.search).get("scheme"); if (q === "light" || q === "dark") setScheme(q); } catch {}
-for (const [k, , fb] of FX) fxSet(k, fxGet(k, fb));
-renderFx();
+fxApplyAll();
 boot();
 </script>
 </html>
