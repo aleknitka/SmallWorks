@@ -86,8 +86,31 @@ def test_groups_show_provider_routing():
     assert first["provider"] == "ollama" and first["model"] == "gpt-oss:latest"
 
 
-def test_put_providers_rejects_unknown():
-    res = client.put("/api/providers", json={"providers": {"nope": {"base_url": "http://x"}}})
+def test_put_providers_accepts_custom_vendor(tmp_path, monkeypatch):
+    # Open registry: unknown names become custom slots (blank seed + user base_url).
+    import shutil
+
+    import smallworks.config as config_mod
+    import smallworks.service as service_mod
+
+    real_dir = config_mod.default_config_dir()
+    fake = tmp_path / "configs"
+    fake.mkdir()
+    shutil.copy(real_dir / "models.yaml", fake / "models.yaml")
+    shutil.copy(real_dir / "workers.yaml", fake / "workers.yaml")
+    shutil.copy(real_dir / "providers.yaml", fake / "providers.yaml")
+    monkeypatch.setattr(config_mod, "default_config_dir", lambda: fake)
+    monkeypatch.setattr(service_mod, "_dotenv_path", lambda: tmp_path / ".env")
+    res = client.put(
+        "/api/providers", json={"providers": {"mycloud": {"base_url": "http://x/v1"}}}
+    )
+    assert res.status_code == 200
+    rows = {p["name"]: p for p in res.json()["providers"]}
+    assert rows["mycloud"]["base_url"] == "http://x/v1"
+
+
+def test_put_providers_rejects_bad_name():
+    res = client.put("/api/providers", json={"providers": {"no pe": {"base_url": "http://x"}}})
     assert res.status_code == 422
 
 

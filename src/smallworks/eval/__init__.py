@@ -144,7 +144,7 @@ def _gateway_for(texts: dict[str, str], transport: ScriptedTransport) -> TaggedG
         "mode": "supervised", "max_retries": 2, "approvals_required": ["blueprint"],
         "max_cost_per_task": 5.0, "max_wallclock_minutes": 60.0,
     })
-    return TaggedGateway(models, workers, policy, transport=transport)
+    return TaggedGateway(models, workers, policy, transport=transport, groups={})
 
 
 def role_texts(*, passing: bool = True) -> dict[str, str]:

@@ -225,14 +225,17 @@ def put_providers(body: ProvidersIn) -> dict:
     current = _configured_providers()
     defaults = default_providers()
     for name, update in body.providers.items():
-        if name not in KNOWN_PROVIDERS:
-            raise HTTPException(status_code=422, detail=f"unknown provider {name!r}")
+        if not name or not __import__("re").fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", name):
+            raise HTTPException(status_code=422, detail=f"bad provider name {name!r}")
         cfg = current.get(name)
-        if cfg is None:  # [+] a new slot: seed from built-in defaults
-            seed = defaults[name]
-            cfg = ProviderConfig(
-                base_url=seed.base_url, api_key_env=seed.api_key_env, default_model=seed.default_model
-            )
+        if cfg is None:  # [+] a new slot: seed known defaults, else blank custom
+            seed = defaults.get(name)
+            if seed is not None:
+                cfg = ProviderConfig(
+                    base_url=seed.base_url, api_key_env=seed.api_key_env, default_model=seed.default_model
+                )
+            else:
+                cfg = ProviderConfig(base_url="http://localhost:8000/v1", api_key_env="")
             current[name] = cfg
         if update.base_url:
             cfg.base_url = update.base_url

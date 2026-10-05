@@ -15,19 +15,18 @@ def test_model_groups_prefer_class_order():
 
     cfg = _load("models.yaml")["models"]
     assert {"strong_reasoning", "engineering", "coder_fast", "reviewer"} <= set(cfg)
-    for group, deployments in cfg.items():
-        assert deployments, group
-        for d in deployments:
+    # Pool shape: every group declares strategy + deployments; all routable.
+    for group, node in cfg.items():
+        assert node["strategy"] == "pool", group
+        assert len(node["deployments"]) >= 2, group
+        for d in node["deployments"]:
             dep = Deployment.model_validate(d)
             assert dep.provider in KNOWN_PROVIDERS, (group, d)
             assert dep.model, (group, d)
             assert dep.model_class in VALID_CLASSES, (group, d)
-    # Local-first: every group leads self-hosted, falls back to frontier
-    # (OpenRouter slot until a model id is picked).
-    assert cfg["strong_reasoning"][0]["class"] == "self-hosted"
-    assert cfg["strong_reasoning"][-1]["provider"] == "openrouter"
-    assert cfg["coder_fast"][0]["class"] == "self-hosted"
-    assert cfg["engineering"][0]["class"] == "self-hosted"
+    # OpenRouter/HuggingFace slots exist as pool members or rescue.
+    vendors = {d["provider"] for node in cfg.values() for d in node["deployments"]}
+    assert {"ollama", "openrouter", "huggingface"} <= vendors
 
 
 def test_factory_policy_loads():

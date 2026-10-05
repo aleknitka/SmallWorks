@@ -11,7 +11,10 @@ from pydantic import BaseModel, Field, model_validator
 DeploymentClass = Literal["frontier", "self-hosted"]
 Tier = Literal["small", "medium", "large"]
 
-KNOWN_PROVIDERS: tuple[str, ...] = ("ollama", "vllm", "litellm", "github", "openai", "openrouter")
+# OpenAI-compatible chat/completions vendors. Custom providers need NO code
+# change: any extra ``providers.<name>`` slot in providers.yaml with a
+# ``base_url`` is routable; the dict below only seeds well-known defaults.
+KNOWN_PROVIDERS: tuple[str, ...] = ("ollama", "vllm", "litellm", "github", "openai", "openrouter", "huggingface")
 PROVIDER_DEFAULT_BASES: dict[str, str] = {
     "ollama": "http://localhost:11434/v1",
     "vllm": "http://localhost:8001/v1",
@@ -19,10 +22,11 @@ PROVIDER_DEFAULT_BASES: dict[str, str] = {
     "github": "https://models.github.ai/inference",
     "openai": "https://api.openai.com/v1",
     "openrouter": "https://openrouter.ai/api/v1",
+    "huggingface": "https://router.huggingface.co/v1",
 }
 # Providers that need an API key unless talking to a local override.
 # Keys are resolved env-first (or .env), never stored in YAML.
-PROVIDERS_REQUIRING_KEY: frozenset[str] = frozenset({"litellm", "github", "openai", "openrouter"})
+PROVIDERS_REQUIRING_KEY: frozenset[str] = frozenset({"litellm", "github", "openai", "openrouter", "huggingface"})
 
 
 class ProviderConfig(BaseModel):
@@ -40,6 +44,7 @@ DEFAULT_API_KEY_ENVS: dict[str, str] = {
     "github": "GITHUB_TOKEN",
     "openai": "OPENAI_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
+    "huggingface": "HF_TOKEN",
 }
 
 
@@ -98,15 +103,37 @@ class WorkerConfig(BaseModel):
     enabled: bool = True
 
 
+class ModelGroup(BaseModel):
+    """One routable pool: deployments tried per ``strategy``.
+
+    ``fallback`` (default): try in listed order, first success wins.
+    ``pool``: same order, but every deployment stays usable — the gateway
+    spreads calls across healthy deployments (round-robin) instead of
+    pinning the first. Failed members are skipped until ``pool_cooldown_s``
+    passes; all-down behaves like ``fallback``.
+    """
+
+    strategy: Literal["fallback", "pool"] = "fallback"
+    pool_cooldown_s: float = Field(default=60.0, ge=0.0)
+    deployments: list[Deployment] = Field(min_length=1)
+
+
 class LoadedConfig(BaseModel):
     models: dict[str, list[Deployment]]
     workers: dict[str, WorkerConfig]
     providers: dict[str, ProviderConfig] = Field(default_factory=default_providers)
+    groups: dict[str, ModelGroup] = Field(default_factory=dict)
     model_config = {"arbitrary_types_allowed": True}
 
     def role_mapping(self) -> dict[str, str]:
         """Role -> model group for enabled workers only."""
         return {r: w.model_group for r, w in self.workers.items() if w.enabled}
+
+    def group_for(self, group: str) -> ModelGroup:
+        """Group policy; groups without an entry behave as plain fallback lists."""
+        if group in self.groups:
+            return self.groups[group]
+        return ModelGroup(deployments=self.models[group])
 
 
 def _read_yaml(path: Path) -> dict:
@@ -119,17 +146,31 @@ def _read_yaml(path: Path) -> dict:
     return data
 
 
-def load_models(path: Path) -> dict[str, list[Deployment]]:
+def load_models(path: Path) -> tuple[dict[str, list[Deployment]], dict[str, ModelGroup]]:
     data = _read_yaml(path)
     raw = data.get("models")
     if not isinstance(raw, dict) or not raw:
         raise ValueError(f"config {path} needs a non-empty 'models' mapping")
     models: dict[str, list[Deployment]] = {}
-    for group, deployments in raw.items():
+    groups: dict[str, ModelGroup] = {}
+    for group, node in raw.items():
+        # Long form: ``strategy``/``deployments`` for pools; plain lists stay fallback.
+        strategy: str = "fallback"
+        cooldown = 60.0
+        deployments = node
+        if isinstance(node, dict):
+            strategy = node.get("strategy", "fallback")
+            cooldown = node.get("pool_cooldown_s", 60.0)
+            deployments = node.get("deployments")
         if not isinstance(deployments, list) or not deployments:
             raise ValueError(f"model group {group!r} needs a non-empty deployment list")
-        models[group] = [Deployment.model_validate(d) for d in deployments]
-    return models
+        parsed = [Deployment.model_validate(d) for d in deployments]
+        models[group] = parsed
+        if strategy != "fallback" or isinstance(node, dict):
+            groups[group] = ModelGroup(
+                strategy=strategy, pool_cooldown_s=cooldown, deployments=parsed
+            )
+    return models, groups
 
 
 def load_workers(path: Path, *, known_groups: set[str]) -> dict[str, WorkerConfig]:
@@ -178,7 +219,7 @@ def load_configs(
     other known vendor resolves from built-in defaults until the user adds it
     via the settings page. Truly unknown provider names still fail fast.
     """
-    models = load_models(models_path)
+    models, groups = load_models(models_path)
     workers = load_workers(workers_path, known_groups=set(models))
     explicit = (
         load_providers(providers_path) if providers_path is not None else default_providers()
@@ -192,7 +233,7 @@ def load_configs(
                     f"model group {group!r} deployment {dep.display_name!r} "
                     f"references unknown provider {dep.provider!r}"
                 )
-    return LoadedConfig(models=models, workers=workers, providers=providers)
+    return LoadedConfig(models=models, workers=workers, providers=providers, groups=groups)
 
 
 def default_config_dir() -> Path:

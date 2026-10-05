@@ -117,6 +117,45 @@ def test_budget_breach_pauses_for_human():
         gw.complete("developer", "write code", task_id="AUTH-017")
 
 
+def test_pool_spreads_calls_across_healthy():
+    from smallworks.config import ModelGroup
+
+    transport = ScriptTransport()
+    pool = {
+        "coder_fast": ModelGroup(
+            strategy="pool", pool_cooldown_s=60.0, deployments=_models()["coder_fast"]
+        )
+    }
+    gw = Gateway(_models(), _workers(), _policy(max_retries=5), transport=transport, groups=pool)
+    for i in range(3):
+        gw.complete("developer", "x", task_id=f"P-{i}")
+    assert transport.calls == ["ollama/fast-a", "vllm/fast-b", "external/fast-c"]
+
+
+def test_pool_skips_down_member_then_shares_live():
+    from smallworks.config import ModelGroup
+
+    transport = ScriptTransport(fail_names={"ollama/fast-a"})
+    pool = {
+        "coder_fast": ModelGroup(
+            strategy="pool", pool_cooldown_s=60.0, deployments=_models()["coder_fast"]
+        )
+    }
+    gw = Gateway(_models(), _workers(), _policy(max_retries=5), transport=transport, groups=pool)
+    for i in range(3):
+        gw.complete("developer", "x", task_id=f"P-{i}")
+    # First call burns fast-a then wins fast-b; next calls rotate fast-b/fast-c.
+    assert transport.calls[0:2] == ["ollama/fast-a", "vllm/fast-b"]
+    assert "ollama/fast-a" not in transport.calls[2:]
+
+
+def test_fallback_order_unchanged_without_pool():
+    transport = ScriptTransport(fail_names={"ollama/fast-a"})
+    gw = Gateway(_models(), _workers(), _policy(), transport=transport)
+    gw.complete("developer", "x", task_id="F-0")
+    assert transport.calls == ["ollama/fast-a", "vllm/fast-b"]
+
+
 def test_unknown_role_rejected():
     gw = Gateway(_models(), _workers(), _policy(), transport=ScriptTransport())
     with pytest.raises(ValueError, match="unknown role"):

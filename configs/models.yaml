@@ -1,41 +1,64 @@
 # Logical model groups -> deployments (spec §4).
 # Workers reference group names only, never provider IDs.
 #
-# Local-first: every group leads with installed Ollama models and falls back
-# to OpenRouter (key in $OPENROUTER_API_KEY or .env; model id is yours to
-# pick, e.g. "openai/gpt-4o-mini" or "anthropic/claude-3-5-sonnet").
-# `class` marks each deployment; order = default preference.
+# Two shapes per group:
+#   plain list            -> `fallback`: try in order, first success wins.
+#   strategy: pool        -> same-priority pool: calls spread across every
+#     healthy deployment (round-robin); failures cool down for
+#     `pool_cooldown_s`, then rejoin. All-down behaves like fallback.
+# Add same-level models by appending to `deployments` — no priority edits.
+# Local-first: Ollama leads, OpenRouter/HuggingFace join pools or rescue.
+# HF_TOKEN / OPENROUTER_API_KEY live in $env or `.env`, never here.
 models:
-  # Local reasoning first (gpt-oss 20B); cloud fallback when you pick a model.
   strong_reasoning:
-    - provider: ollama
-      model: gpt-oss:latest
-      class: self-hosted
-    - provider: openrouter
-      model: openrouter/fallback-reasoning
-      class: frontier
-  # Local planning (mistral-nemo 12B, 1M ctx); cloud fallback.
+    strategy: pool
+    pool_cooldown_s: 60.0
+    deployments:
+      - provider: ollama
+        model: gpt-oss:latest
+        class: self-hosted
+      - provider: ollama
+        model: mistral-nemo:12b
+        class: self-hosted
+      - provider: openrouter
+        model: openrouter/fallback-reasoning
+        class: frontier
   engineering:
-    - provider: ollama
-      model: mistral-nemo:12b
-      class: self-hosted
-    - provider: openrouter
-      model: openrouter/fallback-engineering
-      class: frontier
-  # Local execution (ornith); cloud fallback.
-  # Note: clef-flash is completion-only (no /chat/completions) — not routable.
+    strategy: pool
+    pool_cooldown_s: 60.0
+    deployments:
+      - provider: ollama
+        model: mistral-nemo:12b
+        class: self-hosted
+      - provider: ollama
+        model: ornith:latest
+        class: self-hosted
+      - provider: huggingface
+        model: YOUR-HF-MODEL-HERE
+        class: frontier
+      - provider: openrouter
+        model: openrouter/fallback-engineering
+        class: frontier
   coder_fast:
-    - provider: ollama
-      model: ornith:latest
-      class: self-hosted
-    - provider: openrouter
-      model: openrouter/fallback-coder
-      class: frontier
-  # Local review (mistral-nemo 12B); cloud fallback breaks ties.
+    strategy: pool
+    pool_cooldown_s: 60.0
+    deployments:
+      - provider: ollama
+        model: ornith:latest
+        class: self-hosted
+      - provider: ollama
+        model: mistral-nemo:12b
+        class: self-hosted
+      - provider: openrouter
+        model: openrouter/fallback-coder
+        class: frontier
   reviewer:
-    - provider: ollama
-      model: mistral-nemo:12b
-      class: self-hosted
-    - provider: openrouter
-      model: openrouter/fallback-reviewer
-      class: frontier
+    strategy: pool
+    pool_cooldown_s: 60.0
+    deployments:
+      - provider: ollama
+        model: mistral-nemo:12b
+        class: self-hosted
+      - provider: openrouter
+        model: openrouter/fallback-reviewer
+        class: frontier

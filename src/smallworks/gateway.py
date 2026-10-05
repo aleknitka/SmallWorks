@@ -255,12 +255,17 @@ class Gateway:
         workers: dict[str, WorkerConfig],
         policy: FactoryPolicy,
         transport: Transport | None = None,
+        groups: dict | None = None,
     ) -> None:
         self.models = models
         self.workers = workers
         self.policy = policy
         self.transport: Transport = transport or OpenAICompatibleTransport()
+        self.groups = dict(groups or {})
         self._slots = {role: threading.Semaphore(cfg.max_concurrent) for role, cfg in workers.items()}
+        self._pool_cursor: dict[str, int] = {}
+        self._pool_down_until: dict[tuple[str, str], float] = {}
+        self._pool_lock = threading.Lock()
 
     def deployments_for_role(self, role: str) -> tuple[str, list[Deployment]]:
         worker = self.workers.get(role)
@@ -280,13 +285,51 @@ class Gateway:
             log.debug("slot acquired, deployments={}", [d.display_name for d in deployments])
             return self._complete_locked(log, role, group, deployments, prompt, task_id=task_id)
 
+    def _order_for_group(self, group: str, deployments: list[Deployment]) -> list[Deployment]:
+        """Attempt order: fallback = listed; pool = round-robin from cursor, down members last."""
+        policy = self.groups.get(group)
+        strategy = policy.strategy if policy is not None else "fallback"
+        if strategy != "pool":
+            return list(deployments)
+        now = time.monotonic()
+        cooldown = policy.pool_cooldown_s if policy is not None else 60.0
+        with self._pool_lock:
+            start = self._pool_cursor.get(group, 0) % max(1, len(deployments))
+            rotated = deployments[start:] + deployments[:start]
+            live = [d for d in rotated if self._pool_down_until.get((group, d.display_name), 0.0) <= now]
+            down = [d for d in rotated if self._pool_down_until.get((group, d.display_name), 0.0) > now]
+            return live + down if live else list(deployments)
+
+    def _note_pool_down(self, group: str, deployment: Deployment, cooldown_s: float) -> None:
+        with self._pool_lock:
+            self._pool_down_until[(group, deployment.display_name)] = time.monotonic() + cooldown_s
+
+    def _advance_pool_cursor(
+        self, group: str, used: Deployment, deployments: list[Deployment], ordered: list[Deployment]
+    ) -> None:
+        """Cursor in base-list coordinates: dead members can't shift the rotation."""
+        with self._pool_lock:
+            if used not in ordered:
+                return
+            try:
+                idx = list(deployments).index(used)
+            except ValueError:
+                return
+            self._pool_cursor[group] = idx + 1
+
     def _complete_locked(
         self, log, role: str, group: str, deployments: list[Deployment], prompt: str, *, task_id: str
     ) -> GatewayCompletion:
+        from smallworks.config import ModelGroup
+
         started = time.monotonic()
-        limit = min(len(deployments), self.policy.max_retries + 1)
+        policy = self.groups.get(group)
+        strategy = policy.strategy if isinstance(policy, ModelGroup) else "fallback"
+        cooldown = policy.pool_cooldown_s if isinstance(policy, ModelGroup) else 60.0
+        ordered = self._order_for_group(group, deployments)
+        limit = min(len(ordered), self.policy.max_retries + 1)
         last_err: Exception | None = None
-        for attempt, deployment in enumerate(deployments[:limit], start=1):
+        for attempt, deployment in enumerate(ordered[:limit], start=1):
             attempt_log = log.bind(
                 attempt=attempt, deployment=deployment.display_name, class_=deployment.model_class
             )
@@ -296,10 +339,14 @@ class Gateway:
                 result = self.transport.complete(deployment, prompt, task_id=task_id)
             except TransportError as exc:
                 last_err = exc
+                if strategy == "pool":
+                    self._note_pool_down(group, deployment, cooldown)
                 attempt_log.warning("deployment failed, falling back: {}", exc)
                 continue
             except Exception as exc:  # defensive: a transport bug must not hang the factory
                 last_err = exc
+                if strategy == "pool":
+                    self._note_pool_down(group, deployment, cooldown)
                 attempt_log.opt(exception=True).warning("transport raised, falling back")
                 continue
             latency_ms = int((time.monotonic() - t0) * 1000)
@@ -322,6 +369,8 @@ class Gateway:
                 raise BudgetExceeded(
                     f"wallclock {elapsed_min:.2f}min exceeds max {self.policy.max_wallclock_minutes}min"
                 )
+            if strategy == "pool":
+                self._advance_pool_cursor(group, deployment, deployments, ordered)
             attempt_log.info(
                 "success via {} tokens={}/{} latency_ms={}",
                 deployment.display_name,

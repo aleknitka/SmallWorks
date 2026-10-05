@@ -1,13 +1,17 @@
 # Provider endpoint slots: base URL + env var holding the API key (spec §4).
-# Keys are NEVER stored here — put OPENROUTER_API_KEY in $env or `.env`
-# (gitignored), or set it on the Tube page; local Ollama needs no key.
-# Ships with local Ollama + one OpenRouter slot: pick the model id in
-# `models.yaml` (`openrouter/...`) or override per-deployment `endpoint`.
+# Keys are NEVER stored here — HF_TOKEN / OPENROUTER_API_KEY go in $env or
+# `.env` (gitignored), or set them on the Tube page. Local Ollama needs no key.
+# Custom vendors need no code change: add a slot with any name + base_url and
+# reference it from models.yaml; well-known names seed from built-in defaults.
 providers:
   ollama:
     base_url: http://localhost:11434/v1
     api_key_env: ""
     default_model: mistral-nemo:12b
+  huggingface:
+    base_url: https://router.huggingface.co/v1
+    api_key_env: HF_TOKEN
+    default_model: ""
   openrouter:
     base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY

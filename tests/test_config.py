@@ -77,7 +77,7 @@ def test_shipped_providers_load_with_key_envs():
 
     # Ships with local Ollama + one OpenRouter slot; the rest resolve defaults.
     slots = load_providers(REPO / "configs" / "providers.yaml")
-    assert set(slots) == {"ollama", "openrouter"}
+    assert set(slots) == {"ollama", "huggingface", "openrouter"}
     assert slots["ollama"].api_key_env == ""  # local: no key sent
     assert slots["openrouter"].api_key_env == "OPENROUTER_API_KEY"
     loaded = load_configs(
