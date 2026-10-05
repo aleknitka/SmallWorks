@@ -249,6 +249,6 @@ def test_retry_carries_feedback_into_next_prompt():
     task = ImplementationTask(task_id="AUTH-017", module="auth", behaviour="b",
                               allowed_files=["a.py"], acceptance_criteria=["c"])
     Workflow(gw, max_retries=1).run_task(task)
-    dev_prompts = [x for x in prompts_seen if "GOAL:" in x]
+    dev_prompts = [x for x in prompts_seen if "GOAL: implement task" in x]
     assert len(dev_prompts) == 2
     assert "REVISE" in dev_prompts[1] and "red" in dev_prompts[1]

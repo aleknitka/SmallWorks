@@ -45,6 +45,16 @@ class TaskNode(BaseModel):
     latest_report: str = ""
 
 
+class Todo(BaseModel):
+    """Internal kanban card (local-only, no GitHub sync): title + TaskStatus."""
+
+    id: str = Field(pattern=r"^[a-z0-9-]+$")
+    title: str = Field(min_length=1)
+    status: TaskStatus = TaskStatus.PENDING
+    detail: str = ""
+    updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class MilestoneView(BaseModel):
     """Render-ready snapshot of a convergence loop (panel polls this)."""
 
@@ -95,6 +105,7 @@ class Store:
         demo = Run(run_id="demo", task_id="DEMO-001", report=_demo_report())
         demo.chat = ChatThread(run_id="demo")
         self._runs: dict[str, Run] = {"demo": demo}
+        self._todos: dict[str, Todo] = {}
         self._milestones: dict[str, MilestoneView] = {}
         self._seed_milestone_showcase()
         self._raw = RecallStore()
@@ -268,6 +279,28 @@ class Store:
 
     def list_milestones(self) -> list[MilestoneView]:
         return list(self._milestones.values())
+
+    def list_todos(self) -> list[Todo]:
+        return list(self._todos.values())
+
+    def upsert_todo(self, todo: Todo) -> Todo:
+        self._todos[todo.id] = todo
+        logger.bind(component="store", todo_id=todo.id).debug("todo upserted status={}", todo.status.value)
+        if self._save_dir is not None:
+            self._save_dir.mkdir(parents=True, exist_ok=True)
+            (self._save_dir / "todos.json").write_text(
+                "[" + ",".join(t.model_dump_json() for t in self._todos.values()) + "]",
+                encoding="utf-8",
+            )
+        return todo
+
+    def move_todo(self, todo_id: str, status: TaskStatus) -> Todo | None:
+        todo = self._todos.get(todo_id)
+        if todo is None:
+            return None
+        todo.status = status
+        todo.updated = datetime.now(timezone.utc)
+        return self.upsert_todo(todo)
 
     def cost_for_task(self, task_id: str) -> tuple[float, int, int]:
         cost, inp, out = 0.0, 0, 0

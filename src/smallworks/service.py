@@ -375,6 +375,52 @@ def get_cost(task_id: str) -> dict:
     return {"task_id": task_id, "cost": cost, "input_tokens": inp, "output_tokens": out}
 
 
+class TodoIn(BaseModel):
+    id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    detail: str = ""
+
+
+class TodoMoveIn(BaseModel):
+    status: str = Field(min_length=1)
+
+
+@app.get("/api/todos")
+def list_todos() -> dict:
+    from smallworks.store import Todo
+
+    _ = Todo  # re-export anchor for the kanban panel
+    return {"todos": [t.model_dump(mode="json") for t in STORE.list_todos()]}
+
+
+@app.put("/api/todos")
+def put_todo(body: TodoIn) -> dict:
+    """Create or rename a card; status stays where the board put it."""
+    from smallworks.store import Todo
+
+    existing = next((t for t in STORE.list_todos() if t.id == body.id), None)
+    todo = Todo(id=body.id, title=body.title, detail=body.detail,
+                status=existing.status if existing else "pending")
+    STORE.upsert_todo(todo)
+    logger.bind(component="service", route="put_todo", todo_id=body.id).info("todo saved")
+    return {"todos": [t.model_dump(mode="json") for t in STORE.list_todos()]}
+
+
+@app.post("/api/todos/{todo_id}/move")
+def move_todo(todo_id: str, body: TodoMoveIn) -> dict:
+    """Advance a card: pending -> running -> passed (done), or blocked/failed (parked)."""
+    from smallworks.schemas import TaskStatus
+
+    try:
+        status = TaskStatus(body.status)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"bad status {body.status!r}")
+    todo = STORE.move_todo(todo_id, status)
+    if todo is None:
+        raise HTTPException(status_code=404, detail="unknown todo")
+    return todo.model_dump(mode="json")
+
+
 @app.get("/api/runs/{run_id}/events")
 def run_events(run_id: str):
     """SSE stream of run snapshots (plan 07); same data as polling, pushed.

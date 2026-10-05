@@ -93,7 +93,14 @@
   form.cmd button:hover, .key:not(:disabled):hover { box-shadow: var(--glow); border-color: var(--ph); }
   .key:disabled { color: var(--ph-dim); border-color: var(--line); cursor: not-allowed; opacity: .55; }
   .note { color: var(--ph-dim); font-size: 11px; margin: 0 0 8px; }
-  #msList .mspick { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  #todoList .lane { border-bottom: 1px dotted var(--line); padding: 6px 0; }
+  #todoList .lane:last-child { border-bottom: none; }
+  #todoList .thead { color: var(--ph-dim); letter-spacing: 2px; font-size: 11px; margin: 6px 0 2px; }
+  #todoList .card { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; margin: 4px 0; cursor: pointer; }
+  #todoList .card:hover { box-shadow: var(--glow); border-color: var(--ph); }
+  #todoList form.add { display: flex; gap: 6px; margin-top: 8px; }
+  #todoList form.add input { flex: 1; font: inherit; font-size: 12px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; min-width: 0; }
+  #todoList form.add button { font: inherit; font-size: 11px; color: var(--ph); background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; cursor: pointer; }
   #msList .mstab { font: inherit; font-size: 11px; color: var(--ph-dim); background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; cursor: pointer; }
   #msList .mstab .verdict.met { color: var(--ph); }
   #msList .mstab .verdict.open { color: var(--amber); }
@@ -149,6 +156,10 @@
     <p class="note">Task graph runs itself until the predicate holds. Click a node for detail; controls queue for the next round.</p>
     <div class="ctl" style="margin-bottom:8px"><button id="msRun" type="button">RUN DEMO LOOP</button><button id="msLive" type="button">RUN LIVE LOOP</button></div>
     <div id="msList"></div>
+  </section>
+  <section aria-label="Todos"><h2>Todos</h2>
+    <p class="note">Internal board — local only, no GitHub sync. Click a card to advance it.</p>
+    <div id="todoList"></div>
   </section>
   <section aria-label="Comms"><h2>Orchestrator chat</h2><div id="chat" aria-live="polite"></div>
     <form class="cmd" id="chatForm"><input id="chatIn" autocomplete="off" spellcheck="false" placeholder="> command or /approve /retry /escalate" aria-label="Message the orchestrator"><button type="submit">SEND</button></form>
@@ -416,6 +427,48 @@ function milestoneCard(m) {
 }
 let msTimer = null;
 function msPoll() { loadMilestones(); }
+const TODO_NEXT = { pending: "running", running: "passed", blocked: "running", failed: "running", passed: null };
+async function loadTodos() {
+  const box = $("todoList"); if (!box) return;
+  let data; try { data = await (await fetch("/api/todos")).json(); } catch { box.textContent = "OFFLINE"; return; }
+  const todos = data.todos || [];
+  box.innerHTML = "";
+  const lanes = [["pending", "QUEUED"], ["running", "ACTIVE"], ["blocked", "HELD"], ["failed", "FAILED"], ["passed", "DONE"]];
+  for (const [status, label] of lanes) {
+    const lane = document.createElement("div"); lane.className = "lane";
+    const head = document.createElement("div"); head.className = "thead";
+    const cards = todos.filter(t => t.status === status);
+    head.textContent = `${label} (${cards.length})`;
+    lane.appendChild(head);
+    for (const t of cards) {
+      const card = document.createElement("div"); card.className = "card";
+      const next = TODO_NEXT[t.status];
+      card.textContent = `${GLYPH(t.status)} ${t.title}`;
+      card.title = next ? `${t.id} — click to advance to ${next}` : `${t.id} — done`;
+      if (next) card.onclick = async () => {
+        card.textContent = "...";
+        await fetch(`/api/todos/${t.id}/move`, { method: "POST",
+          headers: {"Content-Type": "application/json"}, body: JSON.stringify({ status: next }) });
+        loadTodos();
+      };
+      lane.appendChild(card);
+    }
+    box.appendChild(lane);
+  }
+  const form = document.createElement("form"); form.className = "add";
+  const inp = document.createElement("input"); inp.placeholder = "> new todo title"; inp.setAttribute("aria-label", "New todo title");
+  const btn = document.createElement("button"); btn.type = "submit"; btn.textContent = "ADD";
+  form.append(inp, btn);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const title = inp.value.trim(); if (!title) return;
+    const id = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || `todo-${Date.now()}`;
+    await fetch("/api/todos", { method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ id, title }) });
+    loadTodos();
+  };
+  box.appendChild(form);
+}
 function setScheme(mode) {
   document.documentElement.dataset.scheme = mode;
   try { localStorage.setItem("sw-scheme", mode); } catch {}
@@ -439,7 +492,7 @@ $("schemeBtn").onclick = () => setScheme(document.documentElement.dataset.scheme
 try { const s = localStorage.getItem("sw-scheme"); if (s === "light" || s === "dark") setScheme(s); } catch {}
 try { const q = new URLSearchParams(location.search).get("scheme"); if (q === "light" || q === "dark") setScheme(q); } catch {}
 fxApplyAll();
-boot(); loadMilestones();
-msTimer = setInterval(() => { const b = $("msList"); if (b && b.isConnected) loadMilestones(); }, 3000);
+boot(); loadMilestones(); loadTodos();
+msTimer = setInterval(() => { const b = $("msList"); if (b && b.isConnected) loadMilestones(); const t = $("todoList"); if (t && t.isConnected) loadTodos(); }, 3000);
 </script>
 </html>
