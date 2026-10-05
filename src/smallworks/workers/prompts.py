@@ -83,12 +83,19 @@ def developer_prompt(
 
 
 def tester_prompt(task: ImplementationTask, patch: Patch) -> str:
+    files = "\n".join(
+        f"--- {path} ---\n{text}" for path, text in patch.contents.items()
+    ) or "(no file contents — names only)"
+    acc = "\n".join(f"- {c}" for c in task.acceptance_criteria)
     return (
-        f"Independently verify task {task.task_id} ({task.behaviour}). "
-        f"Changed files: {', '.join(patch.files_changed)}. "
-        f"Acceptance: {'; '.join(task.acceptance_criteria)}. "
+        f"GOAL: independently verify task {task.task_id}: {task.behaviour}.\n"
+        f"ACCEPTANCE (every criterion must hold — test each one mentally):\n{acc}\n"
+        "RULES: read the code below line by line; report what the code DOES, "
+        "not what the summary claims. Edge cases (empty input, wrong types, "
+        "boundary attempts) count as failures if unhandled. "
         f"{JSON_ONLY} Shape: "
-        '{"passed": true, "tests_run": 3, "tests_failed": 0}'
+        '{"passed": true, "tests_run": 3, "tests_failed": 0}\n'
+        f"CHANGED FILES ({patch.summary}):\n{files}"
     )
 
 
