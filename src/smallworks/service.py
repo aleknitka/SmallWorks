@@ -90,6 +90,50 @@ def post_control(run_id: str, body: ControlIn) -> dict:
     )
     return {"run_id": run_id, "state": state}
 
+class MilestoneControlIn(BaseModel):
+    task_id: str = Field(min_length=1)  # task AUTH-017 or milestone AUTH-M1
+    action: str = Field(min_length=1)
+    argument: str = ""
+
+
+@app.get("/api/milestones")
+def list_milestones() -> dict:
+    return {"milestones": [m.model_dump(mode="json") for m in STORE.list_milestones()]}
+
+
+@app.get("/api/milestones/{milestone_id}")
+def get_milestone(milestone_id: str) -> dict:
+    view = STORE.get_milestone(milestone_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="unknown milestone")
+    return view.model_dump(mode="json")
+
+
+@app.post("/api/milestones/{milestone_id}/control")
+def post_milestone_control(milestone_id: str, body: MilestoneControlIn) -> dict:
+    """Queue a human control for a running loop (approve/reject/send_back/retry/cancel).
+
+    Controls drain FIFO at the top of each milestone round; approve/reject on
+    the milestone id close or park it without running further rounds.
+    """
+    from smallworks.store import MilestoneView
+    from smallworks.supervision import TaskControl
+
+    view = STORE.get_milestone(milestone_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="unknown milestone")
+    try:
+        control = TaskControl(task_id=body.task_id, action=body.action, argument=body.argument)  # type: ignore[arg-type]
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"unknown action {body.action!r}")
+    pending = _milestone_controls.setdefault(milestone_id, [])
+    pending.append(control)
+    logger.bind(component="service", route="post_milestone_control",
+                milestone_id=milestone_id).info("control queued: {} on {}", control.action, control.task_id)
+    _ = MilestoneView
+    return {"milestone_id": milestone_id, "queued": len(pending)}
+
+
 @app.get("/api/tasks/{task_id}/cost")
 def get_cost(task_id: str) -> dict:
     cost, inp, out = STORE.cost_for_task(task_id)
@@ -142,6 +186,14 @@ def _providers_path() -> Path:
     from smallworks.config import default_config_dir
 
     return default_config_dir() / "providers.yaml"
+
+
+_milestone_controls: dict[str, list] = {}
+
+
+def pop_milestone_controls(milestone_id: str) -> list:
+    """Drain queued controls for a loop (service owns the queue; workflow consumes)."""
+    return _milestone_controls.pop(milestone_id, [])
 
 
 def _dotenv_path() -> Path:

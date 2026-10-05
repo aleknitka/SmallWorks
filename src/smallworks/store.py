@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from smallworks.adapters.rtk import RecallStore, compress_output, recall_output
 from smallworks.logging import logger
-from smallworks.schemas import RunReport, TaskStatus
+from smallworks.schemas import Milestone, RunReport, TaskStatus
 from smallworks.supervision import BoardRecord, TaskControl, apply_control
 
 
@@ -29,6 +29,32 @@ class ChatMessage(BaseModel):
 class ChatThread(BaseModel):
     run_id: str
     messages: list[ChatMessage] = Field(default_factory=list)
+
+
+class TaskNode(BaseModel):
+    """One DAG node for the milestone panel: identity, edges, latest state."""
+
+    task_id: str
+    depends_on: list[str] = Field(default_factory=list)
+    wave: int = 0
+    outcome: str = "pending"  # pending/passed/retry/escalated
+    action: str = ""  # last Decision.action
+    reason: str = ""
+    attempts: int = 0
+    test_status: str = "unknown"
+    latest_report: str = ""
+
+
+class MilestoneView(BaseModel):
+    """Render-ready snapshot of a convergence loop (panel polls this)."""
+
+    milestone_id: str
+    predicate: str = "all_tasks_pass"
+    verdict: str = "open"
+    rounds: int = 0
+    max_rounds: int = 5
+    nodes: list[TaskNode] = Field(default_factory=list)
+    round_outcomes: list[dict[str, str]] = Field(default_factory=list)
 
 
 class Run(BaseModel):
@@ -69,6 +95,8 @@ class Store:
         demo = Run(run_id="demo", task_id="DEMO-001", report=_demo_report())
         demo.chat = ChatThread(run_id="demo")
         self._runs: dict[str, Run] = {"demo": demo}
+        self._milestones: dict[str, MilestoneView] = {}
+        self._seed_milestone_showcase()
         self._raw = RecallStore()
         self._save_dir = save_dir
         self._seed_showcase()
@@ -82,6 +110,28 @@ class Store:
             run.chat = ChatThread(run_id=run_id)
             run.state = {"status": "paused" if status == TaskStatus.BLOCKED else "running"}
             self._runs[run_id] = run
+
+    def _seed_milestone_showcase(self) -> None:
+        """Static diamond so the panel has depth on first boot (mirrors _seed_showcase)."""
+        self._milestones["AUTH-M1"] = MilestoneView(
+            milestone_id="AUTH-M1",
+            verdict="open",
+            rounds=1,
+            max_rounds=5,
+            nodes=[
+                TaskNode(task_id="AUTH-017", wave=0, outcome="passed", action="pass",
+                         attempts=1, test_status="passed", latest_report="review PASS: looks good"),
+                TaskNode(task_id="AUTH-018", wave=1, outcome="retry",
+                         action="escalate", reason="retry budget spent after 1 attempts",
+                         attempts=1, test_status="failed",
+                         latest_report="tests failed (3 run, 1 failed)",
+                         depends_on=["AUTH-017"]),
+                TaskNode(task_id="AUTH-019", wave=1, outcome="passed", action="pass",
+                         attempts=1, test_status="passed", latest_report="review PASS: looks good",
+                         depends_on=["AUTH-017"]),
+            ],
+            round_outcomes=[{"AUTH-017": "pass", "AUTH-018": "escalate", "AUTH-019": "pass"}],
+        )
 
     def list_runs(self) -> list[Run]:
         return list(self._runs.values())
@@ -170,6 +220,16 @@ class Store:
         elif run.state.get("status") == "running":
             run.status = TaskStatus.RUNNING
         return run.state
+
+    def record_milestone(self, view: MilestoneView) -> MilestoneView:
+        self._milestones[view.milestone_id] = view
+        return view
+
+    def get_milestone(self, milestone_id: str) -> MilestoneView | None:
+        return self._milestones.get(milestone_id)
+
+    def list_milestones(self) -> list[MilestoneView]:
+        return list(self._milestones.values())
 
     def cost_for_task(self, task_id: str) -> tuple[float, int, int]:
         cost, inp, out = 0.0, 0, 0

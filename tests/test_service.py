@@ -86,6 +86,31 @@ def test_groups_show_provider_routing():
     assert first["provider"] == "ollama" and first["model"] == "gpt-oss:latest"
 
 
+def test_milestone_showcase_listed():
+    body = client.get("/api/milestones").json()
+    assert any(m["milestone_id"] == "AUTH-M1" for m in body["milestones"])
+
+
+def test_milestone_detail_has_waves():
+    body = client.get("/api/milestones/AUTH-M1").json()
+    waves = {n["task_id"]: n["wave"] for n in body["nodes"]}
+    assert waves == {"AUTH-017": 0, "AUTH-018": 1, "AUTH-019": 1}
+    assert body["round_outcomes"][0]["AUTH-018"] == "escalate"
+
+
+def test_milestone_unknown_404():
+    assert client.get("/api/milestones/NOPE-M9").status_code == 404
+
+
+def test_milestone_control_queues():
+    res = client.post("/api/milestones/AUTH-M1/control",
+                      json={"task_id": "AUTH-M1", "action": "approve"}).json()
+    assert res["queued"] >= 1
+    bad = client.post("/api/milestones/AUTH-M1/control",
+                      json={"task_id": "AUTH-M1", "action": "nonsense"})
+    assert bad.status_code == 422
+
+
 def test_put_providers_accepts_custom_vendor(tmp_path, monkeypatch):
     # Open registry: unknown names become custom slots (blank seed + user base_url).
     import shutil

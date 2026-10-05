@@ -245,6 +245,57 @@ class MilestoneResult:
     history: list[list[TaskResult]] = field(default_factory=list)
 
 
+def milestone_view(
+    tasks: list[ImplementationTask],
+    milestone: Milestone,
+    latest: dict[str, TaskResult],
+    history: list[list[TaskResult]],
+    round_no: int,
+) -> dict:
+    """Render-ready snapshot: wave-ranked nodes + per-round outcomes + verdict.
+
+    Returns plain data (not store models — workflow stays store-free); the
+    service layer maps it into ``MilestoneView`` for persistence.
+    """
+    waves = _waves(tasks)
+    wave_of = {t.task_id: i for i, wave in enumerate(waves) for t in wave}
+    nodes = []
+    for t in tasks:
+        r = latest.get(t.task_id)
+        test_status = "unknown"
+        latest_report = ""
+        if r is not None and r.test_report is not None:
+            test_status = "passed" if r.test_report.passed else "failed"
+            latest_report = (
+                f"tests {'passed' if r.test_report.passed else 'failed'} "
+                f"({r.test_report.tests_run} run, {r.test_report.tests_failed} failed)"
+            )
+        if r is not None and r.review is not None and r.decision.action == "pass":
+            latest_report = f"review {r.review.verdict}: {r.review.notes}"
+        nodes.append(
+            {
+                "task_id": t.task_id,
+                "depends_on": list(t.depends_on),
+                "wave": wave_of.get(t.task_id, 0),
+                "outcome": r.outcome.value if r is not None else "pending",
+                "action": r.decision.action if r is not None else "",
+                "reason": r.decision.reason if r is not None else "",
+                "attempts": r.attempts if r is not None else 0,
+                "test_status": test_status,
+                "latest_report": latest_report,
+            }
+        )
+    return {
+        "milestone_id": milestone.milestone_id,
+        "predicate": milestone.predicate,
+        "verdict": milestone.verdict,
+        "rounds": round_no,
+        "max_rounds": milestone.max_rounds,
+        "nodes": nodes,
+        "round_outcomes": [{r.task_id: r.decision.action for r in rnd} for rnd in history],
+    }
+
+
 def run_until_milestone(
     tasks: list[ImplementationTask],
     milestone: Milestone,
@@ -254,6 +305,7 @@ def run_until_milestone(
     max_workers: int = 4,
     worktree_root: str | None = None,
     controls: list | None = None,
+    on_round=None,
 ) -> MilestoneResult:
     """Run the task graph until the milestone predicate holds, or park it.
 
@@ -262,6 +314,8 @@ def run_until_milestone(
     ``validate_milestone`` over the latest decisions. ``met`` ends the loop;
     ``breached`` or ``max_rounds`` spent parks for a human. A ``retry`` control
     re-enters an escalated task; ``cancel`` stops the loop immediately.
+    ``on_round`` receives a ``milestone_view`` snapshot after every round
+    (service wires it to STORE so the panel can poll).
     """
     from smallworks.supervision import TaskControl
 
@@ -311,9 +365,11 @@ def run_until_milestone(
         for r in round_results:
             latest[r.task_id] = r
         current = validate_milestone(current, {tid: r.decision for tid, r in latest.items()})
+        if on_round is not None:
+            on_round(milestone_view(tasks, current, latest, history, round_no))
         log.debug("milestone round {} verdict={}", round_no, current.verdict)
         if current.verdict in ("met", "breached"):
             return MilestoneResult(current, round_no, history)
 
 
-__all__ = ["MilestoneResult", "TaskOutcome", "TaskResult", "TaskState", "Workflow", "run_until_milestone", "run_workflow"]
+__all__ = ["MilestoneResult", "TaskOutcome", "TaskResult", "TaskState", "Workflow", "milestone_view", "run_until_milestone", "run_workflow"]
