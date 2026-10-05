@@ -23,15 +23,21 @@ NOT a replacement board. Plan 05 board sync still stands.
   `/api/runs`.
 - `tests/test_service.py` — runs list, chat round-trip, 404s, UI served.
 
-## Acceptance (done except container build)
+## Acceptance
 
-- `uv run pytest` green (9 passed); endpoints smoke-tested via TestClient.
+- `uv run pytest` green (78 passed, Phase 07); endpoints smoke-tested via
+  TestClient: `/api/runs`, chat round-trip, `logs`, `cost`, UI served with
+  control buttons + `EventSource` stream hookup.
 - `compose.yaml` parses; `Dockerfile` base + sync flow valid.
-- NOT done: `docker build` — daemon not running on this machine. Run
+- `GET /api/runs/{id}/events` verified live: 404 with flags off, 200
+  `text/event-stream` snapshot with `SMALLWORKS_PHASE2=event_stream`.
+- NOT done: `docker build` — Docker Desktop daemon not running on this machine
+  (client 29.5.2, no engine at `dockerDesktopLinuxEngine`). Run
   `podman-compose up --build` (or `docker compose up --build`) where a
   runtime is available.
 
-## Follow-ups (plan 04/05)
+## Follow-ups (all landed in Phases 04/05/07)
 
-- Replace chat stub with real orchestrator routing; persist store; stream
-  workflow events into the UI instead of polling.
+- Chat routes to the orchestrator run thread (`store.post_chat` + control API);
+  durable `RunReport` JSON via `Store(save_dir)`; UI streams `snapshot` events
+  over SSE when `event_stream` is on, polling otherwise.
