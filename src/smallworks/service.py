@@ -302,11 +302,29 @@ def _run_live_milestone(milestone_id: str) -> None:
     )
     tasks = [
         ImplementationTask(
-            task_id="LIVE-101", module="textutils",
-            behaviour="add a slugify(text) helper returning lowercase dash-joined words",
-            allowed_files=["src/smallworks/textutils.py"],
-            acceptance_criteria=["slugify('Hello World!') returns 'hello-world'"],
+            task_id="LIVE-101", module="retrier",
+            behaviour=(
+                "implement a dependency-free retry policy engine: RetryPolicy(total, "
+                "backoff_base, backoff_cap, retryable) with delay_for(attempt) "
+                "(exponential backoff capped, deterministic full jitter from a seeded "
+                "Random), should_retry(exc, attempt) (retryable exception types only, "
+                "attempts counted from 1, never past total), and run(fn) (calls fn, "
+                "sleeps the computed delay between attempts, re-raises the LAST "
+                "exception after total attempts, returns fn value on success). "
+                "Non-retryable exceptions propagate immediately with no sleep. "
+                "sleep must be injectable (default time.sleep)."
+            ),
+            allowed_files=["src/smallworks/retrier.py"],
+            acceptance_criteria=[
+                "delay_for grows exponentially and never exceeds backoff_cap",
+                "same seed -> identical delay sequence (deterministic jitter)",
+                "should_retry False for non-retryable types and attempt > total",
+                "run returns fn value on eventual success; sleeps between attempts",
+                "run re-raises the LAST exception after total attempts exhausted",
+                "non-retryable exception propagates with zero sleeps",
+            ],
         ),
+
         ImplementationTask(
             task_id="LIVE-102", module="textutils",
             behaviour="add unit tests for slugify covering spaces, punctuation and empty string",

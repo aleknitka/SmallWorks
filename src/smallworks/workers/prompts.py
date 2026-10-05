@@ -40,23 +40,29 @@ def developer_prompt(
     symbols: list[str] | None = None,
     existing: dict[str, str] | None = None,
 ) -> str:
-    syms = "; ".join(symbols or [])
-    base = (
-        f"Implement task {task.task_id} in module {task.module}: {task.behaviour}. "
-        f"Touch ONLY these files: {', '.join(task.allowed_files)}. "
-        f"Acceptance: {'; '.join(task.acceptance_criteria)}. "
-        f"Relevant symbols: {syms}. {JSON_ONLY} Shape: "
+    """Context Packet for the developer: goal + contract + symbols + tests + rules.
+
+    Every section is load-bearing: GOAL scopes the change, CONTRACT pins the
+    public API (names, types, errors), SYMBOLS names what's already available,
+    TESTS lists the exact cases the hidden suite checks, RULES pins shape and
+    determinism, FILES gives HEAD content to edit from (or names what's absent).
+    """
+    syms = "; ".join(symbols or []) or "(stdlib only — no repo symbols available)"
+    tests = "\n".join(f"- {c}" for c in task.acceptance_criteria) or "- (none)"
+    files = "\n".join(f"--- {path} ---\n{text}" for path, text in (existing or {}).items())
+    if not files:
+        files = "(no in-scope files exist yet — create them)"
+    return (
+        f"GOAL: implement task {task.task_id} in module {task.module}: {task.behaviour}.\n"
+        f"CONTRACT (public API — names, signatures, and errors are binding):\n{tests}\n"
+        f"SYMBOLS available: {syms}.\n"
+        f"TESTS the hidden suite will run (every one must pass):\n{tests}\n"
+        f"RULES: touch ONLY these files: {', '.join(task.allowed_files)}. "
+        f"Stdlib only, no new dependencies. {JSON_ONLY} Shape: "
         '{"files_changed": ["src/..."], "summary": "<one line>", '
         '"contents": {"<path>": "<COMPLETE new file text>"}}. '
-        "contents MUST hold every changed file in full; an unwritten file fails verification."
-    )
-    if not existing:
-        return base
-    current = "\n".join(
-        f"--- {path} ---\n{text}" for path, text in existing.items()
-    )
-    return (
-        f"{base}\nCurrent file content (edit from this; keep unrelated code intact):\n{current}"
+        "contents MUST hold every changed file in full; an unwritten file fails verification.\n"
+        f"FILES (HEAD content — edit from this, keep unrelated code intact):\n{files}"
     )
 
 

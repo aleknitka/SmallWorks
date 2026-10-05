@@ -150,6 +150,10 @@ def test_prompt_carries_existing_file_text():
     assert "Current file content" not in plain
     rich = developer_prompt(task, None, {"src/smallworks/textutils.py": "X = 1\n"})
     assert "--- src/smallworks/textutils.py ---" in rich and "X = 1" in rich
+    for section in ("GOAL:", "CONTRACT", "SYMBOLS", "TESTS", "RULES:", "FILES"):
+        assert section in rich
+    absent = developer_prompt(task, None, {})
+    assert "no in-scope files exist yet" in absent
 
 
 def test_read_existing_skips_missing_and_non_python(tmp_path):
