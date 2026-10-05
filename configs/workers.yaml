@@ -26,3 +26,7 @@ workers:
     model_group: reviewer
     tier: medium
     max_concurrent: 4
+  writer:
+    model_group: reviewer
+    tier: small
+    max_concurrent: 4

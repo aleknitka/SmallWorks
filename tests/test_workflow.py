@@ -92,8 +92,8 @@ def test_happy_path_passes(tmp_path):
     assert result.decision.action == "pass"
     assert result.patch is not None and result.patch.files_changed == ["src/auth/token.py"]
     assert result.test_report is not None and result.test_report.passed
+    assert result.writer_notes == "docs updated."
     assert result.states[-1] == "done"
-
 
 def test_test_failure_retries_then_escalates(tmp_path):
     gw = _gateway(_texts(pass_tests=False))
@@ -128,6 +128,13 @@ def test_transport_failure_escalates_after_retries(tmp_path):
     assert result.outcome == TaskOutcome.ESCALATED
     assert result.attempts == 2
 
+
+def test_writer_failure_keeps_pass_without_notes(tmp_path):
+    gw = _gateway(_texts(), fail_roles={"writer"})
+    result = Workflow(gw, worktree_root=str(tmp_path)).run_task(_task())
+    assert result.outcome == TaskOutcome.PASSED
+    assert result.writer_notes == ""
+    assert result.states[-1] == "done"
 
 def test_two_modules_run_concurrently(tmp_path):
     gw = _gateway(_texts())

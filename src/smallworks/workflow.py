@@ -65,6 +65,7 @@ class TaskResult:
     patch: Patch | None = None
     test_report: TestReport | None = None
     review: ReviewReport | None = None
+    writer_notes: str = ""
     states: list[str] = field(default_factory=list)
 
 
@@ -194,9 +195,16 @@ class Workflow:
                                  reason="reviewer escalated")
             if gated.action == "pass":
                 states.append(TaskState.WRITE)
+                notes = ""
+                try:
+                    from smallworks.workers.roles import writer_task
+
+                    notes = writer_task(task, last_patch, self.gateway)
+                except (WorkerError, GatewayExhausted, BudgetExceeded) as exc:
+                    log.warning("writer failed, keeping pass without notes: {}", exc)
                 states.append(TaskState.DONE)
                 return TaskResult(task.task_id, TaskOutcome.PASSED, attempts,
-                                  gated, last_patch, last_report, last_review,
+                                  gated, last_patch, last_report, last_review, notes,
                                   [s.value for s in states])
             if gated.action == "escalate":
                 return TaskResult(task.task_id, TaskOutcome.ESCALATED, attempts,
