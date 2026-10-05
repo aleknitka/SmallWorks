@@ -62,3 +62,40 @@ def test_validate_config_pass_and_bad_group(tmp_path: Path, capsys: pytest.Captu
         encoding="utf-8",
     )
     assert cmd_validate_config(models_path, bad_workers) == 1
+
+
+def test_providers_defaults_when_file_missing(tmp_path: Path):
+    from smallworks.config import PROVIDER_DEFAULT_BASES, load_providers
+
+    providers = load_providers(tmp_path / "no-such-providers.yaml")
+    assert set(providers) == set(PROVIDER_DEFAULT_BASES)
+    assert providers["github"].api_key_env == "GITHUB_TOKEN"
+
+
+def test_shipped_providers_load_with_key_envs():
+    from smallworks.config import load_providers
+
+    providers = load_providers(REPO / "configs" / "providers.yaml")
+    assert providers["github"].base_url.startswith("https://")
+    assert providers["ollama"].api_key_env == ""  # local: no key sent
+
+
+def test_unknown_provider_in_models_fails_fast(tmp_path: Path):
+    from smallworks.config import load_configs
+
+    models = tmp_path / "models.yaml"
+    models.write_text(
+        yaml.safe_dump(
+            {"models": {"g": [{"provider": "nope", "model": "m", "class": "frontier"}]}}
+        ),
+        encoding="utf-8",
+    )
+    workers = tmp_path / "workers.yaml"
+    workers.write_text(
+        yaml.safe_dump(
+            {"workers": {"developer": {"model_group": "g", "tier": "small", "max_concurrent": 1}}}
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unknown provider"):
+        load_configs(models, workers)

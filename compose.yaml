@@ -10,11 +10,14 @@ services:
     volumes:
       # Configs mounted so model/worker tuning needs no rebuild.
       - ./configs:/app/configs:ro
+      # .env holds provider API keys (written by the Providers page); absent = local-only.
       # Loguru file sink (logs/smallworks.log) survives restarts.
       - ./logs:/app/logs
+    env_file:
+      - path: ./.env
+        required: false
     environment:
       SMALLWORKS_PORT: ${SMALLWORKS_PORT:-8000}
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/runs')"]
       interval: 30s

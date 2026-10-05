@@ -121,3 +121,43 @@ def test_unknown_role_rejected():
     gw = Gateway(_models(), _workers(), _policy(), transport=ScriptTransport())
     with pytest.raises(ValueError, match="unknown role"):
         gw.complete("janitor", "x", task_id="A-1")
+
+
+def test_resolve_endpoint_prefers_deployment_endpoint():
+    from smallworks.config import default_providers
+    from smallworks.gateway import resolve_endpoint
+
+    dep = Deployment.model_validate(
+        {"provider": "ollama", "endpoint": "http://custom:11434/v1", "model": "m"}
+    )
+    assert resolve_endpoint(dep, default_providers()).base_url == "http://custom:11434/v1"
+
+
+def test_resolve_endpoint_env_overrides_yaml(tmp_path):
+    from smallworks.config import default_providers
+    from smallworks.gateway import resolve_endpoint
+
+    dep = Deployment.model_validate({"provider": "github", "model": "openai/gpt-4o-mini"})
+    resolved = resolve_endpoint(dep, default_providers(), env={"GITHUB_TOKEN": "sekret"})
+    assert resolved.headers == {"Authorization": "Bearer sekret"}
+    assert resolved.base_url == "https://models.github.ai/inference"
+
+
+def test_resolve_endpoint_reads_dotenv(tmp_path):
+    from smallworks.config import default_providers
+    from smallworks.gateway import load_dotenv, resolve_endpoint
+
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("GITHUB_TOKEN=from-file\n", encoding="utf-8")
+    assert load_dotenv(dotenv) == {"GITHUB_TOKEN": "from-file"}
+    dep = Deployment.model_validate({"provider": "github", "model": "openai/gpt-4o-mini"})
+    resolved = resolve_endpoint(dep, default_providers(), env={}, dotenv_path=dotenv)
+    assert resolved.headers == {"Authorization": "Bearer from-file"}
+
+
+def test_resolve_endpoint_unknown_provider_rejected():
+    from smallworks.gateway import TransportError, resolve_endpoint
+
+    dep = Deployment.model_validate({"provider": "nope", "model": "m"})
+    with pytest.raises(TransportError, match="no endpoint"):
+        resolve_endpoint(dep, {})

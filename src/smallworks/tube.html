@@ -60,17 +60,26 @@
   header nav a:hover, header button:hover { box-shadow: var(--glow); border-color: var(--ph); }
   header nav a[aria-current="page"] { color: var(--ink); border-color: var(--ph); }
   :focus-visible { outline: 2px solid var(--ph); outline-offset: 2px; }
-  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; align-items: start; }
+  .note { color: var(--ph-dim); font-size: 11px; margin: 0 0 8px; }
+  .note code { color: var(--ph); }
+  .prov { border-bottom: 1px dotted var(--line); padding: 8px 0; min-width: 0; }
+  .prov:last-child { border-bottom: none; }
+  .prov .top { display: flex; align-items: center; gap: 10px; }
+  .prov .nm { flex: 1; }
+  .prov .key { font-size: 11px; color: var(--ph-dim); white-space: nowrap; }
+  .prov .key.set { color: var(--ph); }
+  .prov label.plab { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 6px; align-items: center; margin-top: 6px; font-size: 11px; color: var(--ph-dim); }
+  .prov input { font: inherit; font-size: 12px; color: var(--ph); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; width: 100%; min-width: 0; }
+  .prov input::placeholder { color: var(--ph-dim); }
+  .prov .save { margin-top: 8px; font: inherit; color: var(--ph); background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 4px 12px; cursor: pointer; }
+  .prov .save:hover { box-shadow: var(--glow); border-color: var(--ph); }
+  .route { border-bottom: 1px dotted var(--line); padding: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
   .fxrow { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dotted var(--line); }
   .fxrow:last-child { border-bottom: none; }
-  .fxrow .nm { flex: 1; }
-  .fxrow .hint { display: block; color: var(--ph-dim); font-size: 11px; }
-  .fxrow .st { color: var(--ph-dim); min-width: 3em; text-align: right; }
-  .fxrow .st.on { color: var(--ph); }
-  .fxrow button { font: inherit; color: var(--ph); background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer; min-width: 4em; }
-  .fxrow button:hover { box-shadow: var(--glow); border-color: var(--ph); }
-  .fxrow button[aria-pressed="false"] { color: var(--ph-dim); }
-  footer { text-align: center; color: var(--ph-dim); letter-spacing: 4px; font-size: 11px; border: 1px solid var(--line); background: var(--bg2); padding: 10px; border-radius: 8px; }
+  .fxrow .nm { flex: 1; min-width: 0; }
+  .route:last-child { border-bottom: none; }
+  .route .grp { color: var(--ph-dim); }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition: none !important; animation: none !important; }
     body::before { display: none; }
@@ -82,6 +91,11 @@
   <button id="schemeBtn" type="button" aria-label="Toggle colour scheme">SCHEME: DARK</button>
 </header>
 <main>
+  <section aria-label="Providers"><h2>Providers</h2>
+    <p class="note">Role → group → provider → endpoint → model. Keys save to <code>.env</code> (gitignored), never to YAML.</p>
+    <div id="provList"></div>
+  </section>
+  <section aria-label="Routing"><h2>Routing</h2><div id="routeList"></div></section>
   <section aria-label="Tube effects"><h2>Tube effects</h2><div id="fxList"></div></section>
   <section aria-label="Display"><h2>Display</h2><div id="schemeList"></div></section>
 </main>
@@ -119,6 +133,55 @@ function renderFx() {
     div.append(nm, st, btn); box.appendChild(div); paint();
   }
 }
+async function loadProviders() {
+  const box = $("provList"); box.innerHTML = "";
+  let data; try { data = await (await fetch("/api/providers")).json(); } catch { box.textContent = "OFFLINE"; return; }
+  for (const p of data.providers) {
+    const div = document.createElement("div"); div.className = "prov";
+    const top = document.createElement("div"); top.className = "top";
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = p.name.toUpperCase();
+    const key = document.createElement("span"); key.className = "key" + (p.key_set ? " set" : "");
+    key.textContent = p.key_set ? `KEY:${p.key_source}` : (p.key_required ? "KEY:MISSING" : "KEY:--");
+    top.append(nm, key); div.appendChild(top);
+    const fields = [
+      ["base_url", "ENDPOINT", p.effective_base_url, "base URL for chat/completions"],
+      ["api_key", "API KEY", "", p.api_key_env ? `new key for ${p.api_key_env} (blank = keep)` : "no key needed (local)"],
+      ["default_model", "MODEL", p.default_model, "default model id"],
+    ];
+    const inputs = {};
+    for (const [f, label, val, ph] of fields) {
+      const lab = document.createElement("label"); lab.className = "plab"; lab.textContent = label;
+      const inp = document.createElement("input");
+      inp.value = f === "api_key" ? "" : val; inp.placeholder = ph;
+      if (f === "api_key") inp.type = "password";
+      if (f === "api_key" && !p.api_key_env) inp.disabled = true;
+      inputs[f] = inp; lab.appendChild(inp); div.appendChild(lab);
+    }
+    const save = document.createElement("button"); save.className = "save"; save.type = "button"; save.textContent = "SAVE";
+    save.onclick = async () => {
+      save.textContent = "SAVING...";
+      const body = { providers: { [p.name]: { base_url: inputs.base_url.value } } };
+      if (inputs.api_key.value) body.providers[p.name].api_key = inputs.api_key.value;
+      if (inputs.default_model.value !== p.default_model) body.providers[p.name].default_model = inputs.default_model.value;
+      const res = await fetch("/api/providers", { method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+      save.textContent = res.ok ? "SEALED" : "FAILED";
+      setTimeout(() => { save.textContent = "SAVE"; }, 1500);
+      if (res.ok) loadProviders();
+    };
+    div.appendChild(save); box.appendChild(div);
+  }
+}
+async function loadRouting() {
+  const box = $("routeList"); box.innerHTML = "";
+  let data; try { data = await (await fetch("/api/models/groups")).json(); } catch { box.textContent = "OFFLINE"; return; }
+  for (const [role, group] of Object.entries(data.roles)) {
+    const div = document.createElement("div"); div.className = "route";
+    const chain = (data.groups[group] || []).map(d => `${d.provider}/${d.model}`).join(" -> ");
+    const r = document.createElement("div"); r.textContent = `${role} -> ${group}`;
+    const g = document.createElement("div"); g.className = "grp"; g.textContent = chain;
+    div.append(r, g); box.appendChild(div);
+  }
+}
 function setScheme(mode) {
   document.documentElement.dataset.scheme = mode;
   try { localStorage.setItem("sw-scheme", mode); } catch {}
@@ -146,6 +209,6 @@ $("schemeBtn").onclick = () => setScheme(document.documentElement.dataset.scheme
 try { const s = localStorage.getItem("sw-scheme"); if (s === "light" || s === "dark") setScheme(s); } catch {}
 try { const q = new URLSearchParams(location.search).get("scheme"); if (q === "light" || q === "dark") setScheme(q); } catch {}
 for (const [k, , , fb] of FX) fxApply(k, fxGet(k, fb));
-renderFx(); paintScheme();
+renderFx(); paintScheme(); loadProviders(); loadRouting();
 </script>
 </html>

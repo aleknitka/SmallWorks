@@ -17,12 +17,14 @@ from __future__ import annotations
 import os
 import threading
 import time
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 import httpx
 from pydantic import BaseModel, Field
 
-from smallworks.config import Deployment, FactoryPolicy, WorkerConfig
+from smallworks.config import Deployment, FactoryPolicy, ProviderConfig, WorkerConfig
 from smallworks.logging import logger
 
 
@@ -67,45 +69,156 @@ class Transport(Protocol):
     def complete(self, deployment: Deployment, prompt: str, *, task_id: str) -> TransportResult: ...
 
 
-def provider_for(deployment_name: str) -> str:
-    """Provider prefix before '/', e.g. 'ollama/qwen' -> 'ollama'."""
-    return deployment_name.split("/", 1)[0] if "/" in deployment_name else "unknown"
+def provider_for(deployment: Deployment | str) -> str:
+    """Provider key for a deployment (or a legacy ``"provider/model"`` name)."""
+    if isinstance(deployment, str):
+        return deployment.split("/", 1)[0] if "/" in deployment else "unknown"
+    return deployment.provider or "unknown"
 
 
-def model_id_for(deployment_name: str) -> str:
-    """Model id after the provider prefix."""
-    return deployment_name.split("/", 1)[1] if "/" in deployment_name else deployment_name
+def model_id_for(deployment: Deployment | str) -> str:
+    """Model id for a deployment (or the remainder of a legacy name)."""
+    if isinstance(deployment, str):
+        return deployment.split("/", 1)[1] if "/" in deployment else deployment
+    return deployment.model
+
+
+def load_dotenv(path: Path | None = None) -> dict[str, str]:
+    """Load ``KEY=VALUE`` pairs from .env (no override of the live environment).
+
+    Returns what was read; never raises — a missing/unreadable file is normal
+    (first run, container without a mounted .env).
+    """
+    env_path = path or Path.cwd() / ".env"
+    loaded: dict[str, str] = {}
+    try:
+        text = env_path.read_text(encoding="utf-8")
+    except OSError:
+        return loaded
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key and key not in loaded:
+            loaded[key] = value
+    return loaded
+
+
+@dataclass
+class ResolvedEndpoint:
+    base_url: str
+    model: str
+    headers: dict[str, str]
+    params: dict
+
+
+def resolve_endpoint(
+    deployment: Deployment,
+    providers: dict[str, ProviderConfig] | None = None,
+    *,
+    env: dict[str, str] | None = None,
+    dotenv_path: Path | None = None,
+) -> ResolvedEndpoint:
+    """Resolve where/how to call a deployment: base URL + model + auth + params.
+
+    Precedence for the base URL: deployment.endpoint > ``<PROVIDER>_BASE_URL``
+    env (or .env) > providers.yaml > built-in default. The API key comes from
+    the provider's ``api_key_env`` var (env first, then .env); empty means the
+    endpoint needs no key (local Ollama/vLLM). Deployment ``params`` ride along
+    as extra JSON fields on the chat request.
+    """
+    from smallworks.config import PROVIDER_DEFAULT_BASES, default_providers
+
+    provider = deployment.provider or "unknown"
+    cfg = (providers or {}).get(provider)
+    environ = env if env is not None else os.environ
+    file_env = load_dotenv(dotenv_path)
+
+    def lookup(name: str) -> str:
+        if name in environ:
+            return str(environ[name])
+        return file_env.get(name, "")
+
+    base = deployment.endpoint or ""
+    if not base:
+        base = lookup(f"{provider.upper()}_BASE_URL")
+    if not base and cfg is not None:
+        base = cfg.base_url
+    if not base:
+        base = PROVIDER_DEFAULT_BASES.get(provider, "")
+    if not base:
+        raise TransportError(f"no endpoint configured for provider {provider!r}")
+    model = deployment.model or (cfg.default_model if cfg else "")
+    if not model:
+        raise TransportError(f"no model configured for provider {provider!r}")
+    headers: dict[str, str] = {}
+    key_env = cfg.api_key_env if cfg and cfg.api_key_env else ""
+    if key_env:
+        key = lookup(key_env)
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+    return ResolvedEndpoint(base_url=base, model=model, headers=headers, params=dict(deployment.params))
 
 
 class OpenAICompatibleTransport:
-    """POST ``{base}/chat/completions``; works for Ollama, vLLM, LiteLLM proxy."""
+    """POST ``{base}/chat/completions``; works for Ollama, vLLM, LiteLLM, GitHub, OpenAI."""
 
-    def __init__(self, base_urls: dict[str, str] | None = None, timeout_s: float = 120.0) -> None:
-        self.base_urls = base_urls or {
-            "ollama": os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-            "vllm": os.environ.get("VLLM_BASE_URL", "http://localhost:8001/v1"),
-            "external": os.environ.get("LITELLM_PROXY_URL", "http://localhost:4000/v1"),
-        }
+    def __init__(
+        self,
+        base_urls: dict[str, str] | None = None,
+        timeout_s: float = 120.0,
+        providers: dict[str, ProviderConfig] | None = None,
+        dotenv_path: Path | None = None,
+    ) -> None:
+        # Legacy per-provider base overrides (kept for tests/callers); the
+        # resolver also honors <PROVIDER>_BASE_URL env, .env, and providers.yaml.
+        self.base_urls = base_urls or {}
         self.timeout_s = timeout_s
+        self.providers = providers
+        self.dotenv_path = dotenv_path
 
     def complete(self, deployment: Deployment, prompt: str, *, task_id: str) -> TransportResult:
-        provider = provider_for(deployment.name)
-        base = self.base_urls.get(provider)
+        provider = provider_for(deployment)
+        overrides = dict(self.base_urls) if self.base_urls else None
+        if overrides and provider in overrides:
+            resolved = ResolvedEndpoint(
+                base_url=overrides[provider],
+                model=model_id_for(deployment),
+                headers={},
+                params=dict(deployment.params),
+            )
+        else:
+            try:
+                resolved = resolve_endpoint(
+                    deployment, self.providers, dotenv_path=self.dotenv_path
+                )
+            except TransportError:
+                if overrides:
+                    raise TransportError(f"no endpoint configured for provider {provider!r}")
+                from smallworks.config import default_providers
+
+                resolved = resolve_endpoint(
+                    deployment, default_providers(), dotenv_path=self.dotenv_path
+                )
         log = logger.bind(
-            component="gateway", task_id=task_id, deployment=deployment.name, provider=provider
+            component="gateway", task_id=task_id, deployment=deployment.display_name, provider=provider
         )
-        if base is None:
-            raise TransportError(f"no endpoint configured for provider {provider!r}")
-        url = base.rstrip("/") + "/chat/completions"
-        log.debug("POST {} model={} prompt_chars={}", url, model_id_for(deployment.name), len(prompt))
+        url = resolved.base_url.rstrip("/") + "/chat/completions"
+        log.debug("POST {} model={} prompt_chars={}", url, resolved.model, len(prompt))
+        payload: dict = {
+            "model": resolved.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+        payload.update(resolved.params)
         try:
             resp = httpx.post(
                 url,
-                json={
-                    "model": model_id_for(deployment.name),
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False,
-                },
+                json=payload,
+                headers=resolved.headers or None,
                 timeout=self.timeout_s,
             )
         except httpx.HTTPError as exc:
@@ -164,7 +277,7 @@ class Gateway:
         log = logger.bind(component="gateway", task_id=task_id, role=role, group=group)
         log.debug("acquiring slot max_concurrent={}", self.workers[role].max_concurrent)
         with slot:
-            log.debug("slot acquired, deployments={}", [d.name for d in deployments])
+            log.debug("slot acquired, deployments={}", [d.display_name for d in deployments])
             return self._complete_locked(log, role, group, deployments, prompt, task_id=task_id)
 
     def _complete_locked(
@@ -175,7 +288,7 @@ class Gateway:
         last_err: Exception | None = None
         for attempt, deployment in enumerate(deployments[:limit], start=1):
             attempt_log = log.bind(
-                attempt=attempt, deployment=deployment.name, class_=deployment.model_class
+                attempt=attempt, deployment=deployment.display_name, class_=deployment.model_class
             )
             attempt_log.debug("trying deployment ({}/{})", attempt, limit)
             t0 = time.monotonic()
@@ -211,7 +324,7 @@ class Gateway:
                 )
             attempt_log.info(
                 "success via {} tokens={}/{} latency_ms={}",
-                deployment.name,
+                deployment.display_name,
                 result.input_tokens,
                 result.output_tokens,
                 latency_ms,
@@ -220,9 +333,9 @@ class Gateway:
                 text=result.text,
                 role=role,
                 group=group,
-                deployment=deployment.name,
+                deployment=deployment.display_name,
                 deployment_class=deployment.model_class,
-                provider=provider_for(deployment.name),
+                provider=provider_for(deployment),
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
                 cost=result.cost,

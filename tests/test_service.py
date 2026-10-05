@@ -61,3 +61,25 @@ def test_tube_serves_settings():
     assert res.status_code == 200
     assert "Tube effects" in res.text and "SCANLINES" in res.text
     assert "sw-fx-" in res.text  # shares toggle keys with the console
+
+
+def test_providers_status_masks_keys():
+    res = client.get("/api/providers")
+    assert res.status_code == 200
+    names = {p["name"] for p in res.json()["providers"]}
+    assert {"ollama", "github", "openai"} <= names
+    for p in res.json()["providers"]:
+        assert "api_key" not in p and "key_set" in p  # presence only, never values
+    assert any(p["key_required"] for p in res.json()["providers"] if p["name"] == "github")
+
+
+def test_groups_show_provider_routing():
+    body = client.get("/api/models/groups").json()
+    assert body["roles"]["developer"] == "coder_fast"
+    first = body["groups"]["strong_reasoning"][0]
+    assert first["provider"] == "litellm" and first["model"] == "frontier-reasoning"
+
+
+def test_put_providers_rejects_unknown():
+    res = client.put("/api/providers", json={"providers": {"nope": {"base_url": "http://x"}}})
+    assert res.status_code == 422

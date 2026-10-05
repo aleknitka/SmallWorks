@@ -11,13 +11,17 @@ def _load(name: str) -> dict:
 
 
 def test_model_groups_prefer_class_order():
+    from smallworks.config import KNOWN_PROVIDERS, Deployment
+
     cfg = _load("models.yaml")["models"]
     assert {"strong_reasoning", "engineering", "coder_fast", "reviewer"} <= set(cfg)
     for group, deployments in cfg.items():
         assert deployments, group
         for d in deployments:
-            assert set(d) == {"name", "class"}, (group, d)
-            assert d["class"] in VALID_CLASSES, (group, d)
+            dep = Deployment.model_validate(d)
+            assert dep.provider in KNOWN_PROVIDERS, (group, d)
+            assert dep.model, (group, d)
+            assert dep.model_class in VALID_CLASSES, (group, d)
     # Factory policy: frontier decides first, self-hosted executes first.
     assert cfg["strong_reasoning"][0]["class"] == "frontier"
     assert cfg["coder_fast"][0]["class"] == "self-hosted"

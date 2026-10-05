@@ -1,0 +1,21 @@
+providers:
+  github:
+    api_key_env: GITHUB_TOKEN
+    base_url: https://models.github.ai/inference
+    default_model: openai/gpt-4o-mini
+  litellm:
+    api_key_env: LITELLM_API_KEY
+    base_url: http://localhost:4000/v1
+    default_model: ''
+  ollama:
+    api_key_env: ''
+    base_url: http://localhost:11434/v1
+    default_model: qwen2.5-coder-8b
+  openai:
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+    default_model: gpt-4o-mini
+  vllm:
+    api_key_env: ''
+    base_url: http://localhost:8001/v1
+    default_model: qwen2.5-coder-14b

@@ -1,6 +1,13 @@
 # Logical model groups → deployments (spec §4).
 # Workers reference group names only, never provider IDs.
 #
+# Each deployment routes as role → group → provider → endpoint → model:
+#   provider: vendor key in configs/providers.yaml (ollama, vllm, litellm, github, openai)
+#   endpoint: optional override of the provider's base_url for this deployment
+#   model: model id sent on the wire (e.g. "qwen2.5-coder-8b", "openai/gpt-4o-mini")
+#   params: optional per-call params merged into the chat request (temperature, …)
+# `name: "provider/model"` stays as a legacy shorthand; explicit fields win.
+#
 # Factory policy: routine execution runs self-hosted-first (cheap, private,
 # fast); frontier models decide and rescue (orchestration, architecture,
 # escalations, disputed reviews). `class` marks each deployment; order =
@@ -8,7 +15,8 @@
 models:
   # Frontier-first: orchestrator triage, architect blueprints.
   strong_reasoning:
-    - name: external/frontier-reasoning
+    - provider: litellm
+      model: frontier-reasoning
       class: frontier
     - name: ollama/llama3.1-70b
       class: self-hosted
@@ -16,7 +24,8 @@ models:
   engineering:
     - name: ollama/qwen2.5-coder-27b
       class: self-hosted
-    - name: external/frontier-engineering
+    - provider: litellm
+      model: frontier-engineering
       class: frontier
   # Self-hosted-first: bounded implementation and test execution.
   coder_fast:
@@ -24,11 +33,13 @@ models:
       class: self-hosted
     - name: vllm/qwen2.5-coder-14b
       class: self-hosted
-    - name: external/frontier-coder
+    - provider: litellm
+      model: frontier-coder
       class: frontier
   # Self-hosted-first: routine review; frontier breaks ties / escalations.
   reviewer:
     - name: ollama/qwen2.5-coder-27b
       class: self-hosted
-    - name: external/frontier-reviewer
+    - provider: litellm
+      model: frontier-reviewer
       class: frontier

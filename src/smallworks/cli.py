@@ -28,9 +28,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("info", help="Show version, roles, and spec pointer")
-    vc = sub.add_parser("validate-config", help="Load models/workers YAMLs and print role -> group mapping")
+    vc = sub.add_parser("validate-config", help="Load models/workers/providers YAMLs and print role -> group mapping")
     vc.add_argument("--models", type=Path, default=None, help="Path to models.yaml")
     vc.add_argument("--workers", type=Path, default=None, help="Path to workers.yaml")
+    vc.add_argument("--providers", type=Path, default=None, help="Path to providers.yaml")
     st = sub.add_parser("status", help="Show run status from the store (spec §10 board fields)")
     st.add_argument("run_id", nargs="?", default=None, help="Run id; omit for all runs")
     lg = sub.add_parser("logs", help="Show run logs (compressed by default, --raw via ref)")
@@ -44,14 +45,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def cmd_validate_config(models: Path | None, workers: Path | None) -> int:
+def cmd_validate_config(models: Path | None, workers: Path | None, providers: Path | None = None) -> int:
     from smallworks.config import default_config_dir, load_configs
 
     log = logger.bind(component="cli", command="validate-config")
-    log.debug("validating models={} workers={}", models, workers)
+    log.debug("validating models={} workers={} providers={}", models, workers, providers)
     cfg_dir = default_config_dir()
     try:
-        loaded = load_configs(models or cfg_dir / "models.yaml", workers or cfg_dir / "workers.yaml")
+        loaded = load_configs(
+            models or cfg_dir / "models.yaml",
+            workers or cfg_dir / "workers.yaml",
+            providers or cfg_dir / "providers.yaml",
+        )
     except (ValueError, OSError) as exc:
         log.error("invalid config: {}", exc)
         print(f"invalid config: {exc}", file=sys.stderr)
@@ -123,7 +128,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"roles: {', '.join(ROLES)}")
         print("spec: docs/spec/SmallWorks-InitialSystemSpecification.md")
     elif args.command == "validate-config":
-        raise SystemExit(cmd_validate_config(args.models, args.workers))
+        raise SystemExit(cmd_validate_config(args.models, args.workers, args.providers))
     elif args.command == "status":
         raise SystemExit(cmd_status(args.run_id))
     elif args.command == "logs":

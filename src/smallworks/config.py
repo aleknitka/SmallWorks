@@ -6,20 +6,87 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 DeploymentClass = Literal["frontier", "self-hosted"]
 Tier = Literal["small", "medium", "large"]
 
-VALID_CLASSES: set[str] = {"frontier", "self-hosted"}
-VALID_TIERS: set[str] = {"small", "medium", "large"}
+KNOWN_PROVIDERS: tuple[str, ...] = ("ollama", "vllm", "litellm", "github", "openai")
+PROVIDER_DEFAULT_BASES: dict[str, str] = {
+    "ollama": "http://localhost:11434/v1",
+    "vllm": "http://localhost:8001/v1",
+    "litellm": "http://localhost:4000/v1",
+    "github": "https://models.github.ai/inference",
+    "openai": "https://api.openai.com/v1",
+}
+# Providers that need an API key unless talking to a local override.
+# Keys are resolved env-first (or .env), never stored in YAML.
+PROVIDERS_REQUIRING_KEY: frozenset[str] = frozenset({"litellm", "github", "openai"})
+
+
+class ProviderConfig(BaseModel):
+    """One vendor endpoint: base URL + env var holding its API key."""
+
+    base_url: str = Field(min_length=1)
+    api_key_env: str = Field(default="", min_length=0)
+    default_model: str = Field(default="", min_length=0)
+
+
+DEFAULT_API_KEY_ENVS: dict[str, str] = {
+    "ollama": "",
+    "vllm": "",
+    "litellm": "LITELLM_API_KEY",
+    "github": "GITHUB_TOKEN",
+    "openai": "OPENAI_API_KEY",
+}
+
+
+def default_providers() -> dict[str, ProviderConfig]:
+    """Seed every known provider with its default base URL (no keys in YAML)."""
+    return {
+        name: ProviderConfig(base_url=base, api_key_env=DEFAULT_API_KEY_ENVS.get(name, ""))
+        for name, base in PROVIDER_DEFAULT_BASES.items()
+    }
 
 
 class Deployment(BaseModel):
-    name: str = Field(min_length=1)
-    model_class: DeploymentClass = Field(alias="class")
+    """One routable model: provider + endpoint + model + per-call params.
 
+    ``name`` stays as a legacy shorthand (``"ollama/qwen2.5-coder-8b"``):
+    provider = prefix, model = remainder. Explicit fields win when both given.
+    """
+
+    name: str = Field(default="", min_length=0)
+    provider: str = Field(default="", min_length=0)
+    endpoint: str = Field(default="", min_length=0)
+    model: str = Field(default="", min_length=0)
+    params: dict = Field(default_factory=dict)
+    model_class: DeploymentClass = Field(default="self-hosted", alias="class")
     model_config = {"populate_by_name": True}
+    @model_validator(mode="after")
+    def _split_legacy_name(self):
+        """Fill provider/model from ``name`` when explicit fields are absent."""
+        if not self.name:
+            return self
+        provider, _, model = self.name.partition("/")
+        if not self.provider:
+            self.provider = provider or "unknown"
+        if not self.model and model:
+            self.model = model
+        return self
+
+    @model_validator(mode="after")
+    def _require_provider_and_model(self):
+        if not self.provider:
+            raise ValueError("deployment needs 'provider' (or legacy 'name' with a prefix)")
+        if not self.model:
+            raise ValueError("deployment needs 'model' (or legacy 'name' with 'provider/model')")
+        return self
+
+    @property
+    def display_name(self) -> str:
+        """Canonical ``provider/model`` label used in logs and gateway records."""
+        return f"{self.provider}/{self.model}"
 
 
 class WorkerConfig(BaseModel):
@@ -32,6 +99,7 @@ class WorkerConfig(BaseModel):
 class LoadedConfig(BaseModel):
     models: dict[str, list[Deployment]]
     workers: dict[str, WorkerConfig]
+    providers: dict[str, ProviderConfig] = Field(default_factory=default_providers)
     model_config = {"arbitrary_types_allowed": True}
 
     def role_mapping(self) -> dict[str, str]:
@@ -78,11 +146,44 @@ def load_workers(path: Path, *, known_groups: set[str]) -> dict[str, WorkerConfi
     return workers
 
 
-def load_configs(models_path: Path, workers_path: Path) -> LoadedConfig:
-    """Load both YAMLs; fail fast on unknown group/tier."""
+def load_providers(path: Path) -> dict[str, ProviderConfig]:
+    """Load ``providers.yaml``; missing file = defaults for every known provider."""
+    try:
+        data = _read_yaml(path)
+    except ValueError as exc:
+        if "not found" in str(exc):
+            return default_providers()
+        raise
+    raw = data.get("providers")
+    if raw is None:
+        return default_providers()
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError(f"config {path} needs a non-empty 'providers' mapping")
+    providers: dict[str, ProviderConfig] = {}
+    for name, cfg in raw.items():
+        if not isinstance(cfg, dict):
+            raise ValueError(f"provider {name!r} must be a mapping")
+        providers[name] = ProviderConfig.model_validate(cfg)
+    return providers
+
+
+def load_configs(
+    models_path: Path, workers_path: Path, providers_path: Path | None = None
+) -> LoadedConfig:
+    """Load models + workers (+ providers); fail fast on unknown group/tier."""
     models = load_models(models_path)
     workers = load_workers(workers_path, known_groups=set(models))
-    return LoadedConfig(models=models, workers=workers)
+    providers = (
+        load_providers(providers_path) if providers_path is not None else default_providers()
+    )
+    for group, deployments in models.items():
+        for dep in deployments:
+            if dep.provider not in providers:
+                raise ValueError(
+                    f"model group {group!r} deployment {dep.display_name!r} "
+                    f"references unknown provider {dep.provider!r}"
+                )
+    return LoadedConfig(models=models, workers=workers, providers=providers)
 
 
 def default_config_dir() -> Path:

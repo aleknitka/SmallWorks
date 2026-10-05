@@ -14,4 +14,6 @@ wheels/
 
 # Runtime logs (loguru file sink)
 logs/
-serve-*.log
+# Secrets: API keys live in .env (written by the Providers page), never in git.
+.env
+.env.*
