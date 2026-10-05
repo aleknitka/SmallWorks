@@ -306,6 +306,7 @@ def run_until_milestone(
     worktree_root: str | None = None,
     controls: list | None = None,
     on_round=None,
+    fresh_controls=None,
 ) -> MilestoneResult:
     """Run the task graph until the milestone predicate holds, or park it.
 
@@ -315,7 +316,9 @@ def run_until_milestone(
     ``breached`` or ``max_rounds`` spent parks for a human. A ``retry`` control
     re-enters an escalated task; ``cancel`` stops the loop immediately.
     ``on_round`` receives a ``milestone_view`` snapshot after every round
-    (service wires it to STORE so the panel can poll).
+    (service wires it to STORE so the panel can poll). ``fresh_controls`` is
+    an optional zero-arg callable returning newly queued controls — the service
+    drains its per-milestone queue through it so panel buttons steer live loops.
     """
     from smallworks.supervision import TaskControl
 
@@ -326,6 +329,8 @@ def run_until_milestone(
     history: list[list[TaskResult]] = []
     round_no = 0
     while True:
+        if fresh_controls is not None:
+            pending_controls.extend(fresh_controls())
         for control in [c for c in pending_controls if isinstance(c, TaskControl)]:
             if control.action == "cancel" and (
                 control.task_id == current.milestone_id or control.task_id in latest

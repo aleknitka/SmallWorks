@@ -119,6 +119,7 @@
   <section aria-label="Routing"><h2>Routing</h2><div id="routeList"></div></section>
   <section aria-label="Milestones"><h2>Milestones</h2>
     <p class="note">Task graph runs itself until the predicate holds. Click a node for detail; controls queue for the next round.</p>
+    <div class="ctl" style="margin-bottom:8px"><button id="msRun" type="button">RUN DEMO LOOP</button></div>
     <div id="msList"></div>
   </section>
   <section aria-label="Tube effects"><h2>Tube effects</h2><div id="fxList"></div></section>
@@ -292,6 +293,16 @@ async function loadMilestones() {
   const box = $("msList"); box.innerHTML = "";
   let data; try { data = await (await fetch("/api/milestones")).json(); } catch { box.textContent = "OFFLINE"; return; }
   if (!data.milestones.length) { box.textContent = "NO MILESTONES"; return; }
+  const run = $("msRun");
+  if (run && !run.dataset.wired) {
+    run.dataset.wired = "1";
+    run.onclick = async () => {
+      run.textContent = "RUNNING...";
+      await fetch("/api/milestones/demo/run", { method: "POST" });
+      run.textContent = "RUN DEMO LOOP";
+      msPoll();
+    };
+  }
   for (const m of data.milestones) box.appendChild(milestoneCard(m));
 }
 function milestoneCard(m) {
@@ -382,6 +393,10 @@ function milestoneCard(m) {
   div.appendChild(ctl);
   return div;
 }
+let msTimer = null;
+function msPoll() { loadMilestones(); }
 renderFx(); paintScheme(); loadProviders(); loadRouting(); loadMilestones();
+if (msTimer) clearInterval(msTimer);
+msTimer = setInterval(() => { const b = $("msList"); if (b && b.isConnected) loadMilestones(); }, 3000);
 </script>
 </html>

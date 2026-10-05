@@ -134,6 +134,114 @@ def post_milestone_control(milestone_id: str, body: MilestoneControlIn) -> dict:
     return {"milestone_id": milestone_id, "queued": len(pending)}
 
 
+_milestone_threads: dict[str, object] = {}
+
+
+def _run_demo_milestone(milestone_id: str) -> None:
+    """Background scripted loop: wave-0 passes, AUTH-018 fails round 1, all pass round 2."""
+    import json as _json
+    import threading as _threading
+
+    from smallworks.config import Deployment, FactoryPolicy, WorkerConfig
+    from smallworks.gateway import Gateway, TransportResult
+    from smallworks.schemas import ImplementationTask, Milestone
+    from smallworks.store import MilestoneView
+    from smallworks.workflow import run_until_milestone
+
+    texts = {
+        "engineer": _json.dumps({"tasks": []}),
+        "developer": _json.dumps({"files_changed": ["src/auth/token.py"], "summary": "fix expiry"}),
+        "tester": _json.dumps({"passed": True, "tests_run": 3, "tests_failed": 0}),
+        "reviewer": _json.dumps({"verdict": "PASS", "notes": "looks good"}),
+        "writer": "docs updated.",
+    }
+
+    class DemoTransport:
+        def __init__(self):
+            self.failed: set[str] = set()
+
+        def complete(self, deployment, prompt, *, task_id):
+            import time as _time
+
+            _time.sleep(1.2)  # visible round pacing for the panel
+            role = prompt.split("::", 1)[0]
+            if role == "tester" and task_id == "AUTH-018" and task_id not in self.failed:
+                self.failed.add(task_id)
+                bad = dict(_json.loads(texts["tester"]))
+                bad.update(passed=False, tests_failed=1)
+                return TransportResult(text=_json.dumps(bad), input_tokens=1, output_tokens=1)
+            return TransportResult(text=texts[role], input_tokens=1, output_tokens=1)
+
+    class DemoGateway(Gateway):
+        def complete(self, role, prompt, *, task_id="TASK-0"):
+            return super().complete(role, f"{role}::{prompt}", task_id=task_id)
+
+    models = {"coder_fast": [Deployment(provider="ollama", model="demo", model_class="self-hosted")]}
+    workers = {
+        r: WorkerConfig(model_group="coder_fast", tier="small", max_concurrent=8)
+        for r in ("engineer", "developer", "tester", "reviewer", "writer")
+    }
+    policy = FactoryPolicy.model_validate(
+        {
+            "mode": "supervised",
+            "max_retries": 1,
+            "approvals_required": ["blueprint"],
+            "max_cost_per_task": 5.0,
+            "max_wallclock_minutes": 60.0,
+        }
+    )
+    gw = DemoGateway(models, workers, policy, transport=DemoTransport())
+
+    def task(tid: str, *deps: str) -> ImplementationTask:
+        return ImplementationTask(
+            task_id=tid, module="auth", behaviour="handle expired token",
+            allowed_files=["src/auth/token.py"],
+            acceptance_criteria=["expired token returns 401"], depends_on=list(deps),
+        )
+
+    tasks = [task("AUTH-017"), task("AUTH-018", "AUTH-017"), task("AUTH-019", "AUTH-017")]
+    ms = Milestone(
+        milestone_id=milestone_id, engineering_plan="plan-demo",
+        predicate="all_tasks_pass", tasks=[t.task_id for t in tasks], max_rounds=5,
+    )
+
+    def on_round(view: dict) -> None:
+        STORE.record_milestone(MilestoneView.model_validate(view))
+
+    run_until_milestone(
+        tasks, ms, gw, max_retries=0, max_workers=2,
+        on_round=on_round, fresh_controls=lambda: pop_milestone_controls(milestone_id),
+    )
+    _milestone_threads.pop(milestone_id, None)
+
+
+@app.post("/api/milestones/demo/run")
+def run_demo_milestone() -> dict:
+    """Start (or re-start) the scripted showcase loop; the panel polls its rounds."""
+    import threading
+
+    from smallworks.store import MilestoneView
+
+    milestone_id = "AUTH-M1"
+    STORE.record_milestone(
+        MilestoneView(
+            milestone_id=milestone_id, verdict="open", rounds=0, max_rounds=5,
+            nodes=[
+                {"task_id": "AUTH-017", "depends_on": [], "wave": 0, "outcome": "pending"},
+                {"task_id": "AUTH-018", "depends_on": ["AUTH-017"], "wave": 1, "outcome": "pending"},
+                {"task_id": "AUTH-019", "depends_on": ["AUTH-017"], "wave": 1, "outcome": "pending"},
+            ],
+            round_outcomes=[],
+        )
+    )
+    if milestone_id not in _milestone_threads:
+        thread = threading.Thread(target=_run_demo_milestone, args=(milestone_id,), daemon=True)
+        _milestone_threads[milestone_id] = thread
+        thread.start()
+    logger.bind(component="service", route="run_demo_milestone").info("demo loop started")
+    return {"milestone_id": milestone_id, "started": True}
+
+
 @app.get("/api/tasks/{task_id}/cost")
 def get_cost(task_id: str) -> dict:
     cost, inp, out = STORE.cost_for_task(task_id)
