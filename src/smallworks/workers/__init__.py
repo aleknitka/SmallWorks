@@ -3,6 +3,7 @@
 from smallworks.workers import prompts
 from smallworks.workers.roles import (
     WorkerError,
+    architect_task,
     developer_task,
     engineer_task,
     reviewer_task,
@@ -12,6 +13,7 @@ from smallworks.workers.roles import (
 
 __all__ = [
     "WorkerError",
+    "architect_task",
     "developer_task",
     "engineer_task",
     "prompts",

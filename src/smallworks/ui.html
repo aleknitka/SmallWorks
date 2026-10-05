@@ -50,6 +50,15 @@ document.querySelectorAll("#controls button").forEach(b => b.onclick = async () 
   await fetch(`/api/runs/${runId}/control`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({action: b.dataset.a})});
   runs();
 });
-runs(); chat(); setInterval(() => { runs(); chat(); }, 5000);
+runs(); chat();
+// Phase-2 event stream when enabled; polling stays the default with flags off.
+if (typeof EventSource !== "undefined") {
+  try {
+    const es = new EventSource(`/api/runs/${runId}/events`);
+    es.addEventListener("snapshot", () => { runs(); chat(); });
+    es.addEventListener("end", () => es.close());
+    es.onerror = () => { es.close(); setInterval(() => { runs(); chat(); }, 5000); };
+  } catch { setInterval(() => { runs(); chat(); }, 5000); }
+} else { setInterval(() => { runs(); chat(); }, 5000); }
 </script>
 </html>

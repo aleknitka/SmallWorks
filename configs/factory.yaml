@@ -23,3 +23,19 @@ factory:
   budgets: # hard stops; exceeding pauses the run and asks a human
     max_cost_per_task: 5.0
     max_wallclock_minutes: 60
+
+  # Phase-2 extensions (plan 07, spec §15): each item ships behind a flag and is
+  # measured against the plan-06 eval baseline before becoming default. All off
+  # means the MVP path (plans 01-06) runs unchanged. `SMALLWORKS_PHASE2` env
+  # (comma list, e.g. `architect,release_gate`) overlays and can only turn on.
+  phase2:
+    architect: false # frontier idea -> Blueprint (human approves via `blueprint` gate)
+    decision_routing: false # bounded Clef/Jev-style routing; deterministic gates rule
+    dynamic_escalation: false # small -> medium -> large on consecutive failures
+    cost_aware_routing: false # cheapest-first order where measured costs exist
+    benchmarking: false # persist per-deployment stats -> measured routing policy
+    context_optimisation: false # shrink packet budget toward measured use
+    semantic_retrieval: false # keyword recall over symbols/summaries
+    release_gate: false # human-approved merge/deploy; never autonomous
+    board_sync_v2: false # richer Projects payload (verdict, tier, cost/context)
+    event_stream: false # SSE run events; polling stays the default UI path

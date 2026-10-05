@@ -15,13 +15,13 @@ GitHub Issues + Projects (task board).
 
 - `src/smallworks/` — control layer: `cli.py` (`status`/`logs`/`cost`), `config.py`,
   `gateway.py` (routing + budgets), `logging.py`, `context.py` + `adapters/`,
-  `workers/` (role prompts), `workflow.py` (gated loop), `worktrees.py`,
-  `supervision.py` (board fields + controls + RunReport), `board.py` (`gh` sync),
-  `eval/` (baseline vs pipeline harness + §13 report), `schemas.py`,
-  `service.py` (runs/chat/control/logs/cost API), `store.py`, `ui.html`
+  `workers/` (role prompts incl. Architect), `workflow.py` (gated loop), `worktrees.py`,
+  `supervision.py` (board fields + controls + RunReport), `board.py` (`gh` sync + v2 payload),
+  `phase2.py` (flag-gated §15 extensions, all off = MVP unchanged), `eval/` (§13 report + `eval_delta`),
+  `schemas.py`, `service.py` (runs/chat/control/logs/cost/events API), `store.py`, `ui.html`
 - `configs/` — `models.yaml` (logical model groups → deployments with class),
   `workers.yaml` (roles, model tiers, concurrency bounds),
-  `factory.yaml` (supervised-autonomy: tiers, escalation, gates, budgets)
+  `factory.yaml` (supervised-autonomy: tiers, escalation, gates, budgets, `phase2` flags)
 - `logs/` — gitignored loguru file sink; check first when investigating
 - `docs/spec/` — system specification (normative)
 - `tests/` — contract/behaviour tests
@@ -73,12 +73,12 @@ GitHub Issues + Projects (task board).
 ## MVP scope (do NOT build)
 
 No long-term semantic memory, no autonomous PR merging, no agent societies — see
-spec §14. Architect role and Clef/Jev routing are Phase 2 (spec §15).
-Note: spec §10/§14 says no custom web UI initially (GitHub Issues board); the
-minimal container UI (`service.py`, `ui.html`) exists per explicit user request
-as a read + chat surface only, NOT a replacement board.
+spec §14. Release stays human-approved: `phase2.merge_allowed` is false without
+a recorded human `release` approval, flags or not. Note: spec §10/§14 says no
+custom web UI initially (GitHub Issues board); the minimal container UI
+(`service.py`, `ui.html`) exists per explicit user request as a read + chat
+surface only, NOT a replacement board.
 
-## Before yielding
-
-`uv run pytest` green; new behaviour covered by a behaviour test; every caller,
-config, and doc updated; no stubs or `TODO: implement`.
+Phase 2 items (spec §15) ship flag-gated in `src/smallworks/phase2.py`, all off
+by default: never wire them into the MVP loop except behind their flag, and
+never let model scores override `schemas.validate_decision` gates.

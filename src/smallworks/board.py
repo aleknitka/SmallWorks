@@ -30,6 +30,30 @@ def to_issue_body(record: BoardRecord) -> str:
     return "\n".join(lines) + "\n"
 
 
+def sync_payload_v2(record: BoardRecord, *, phase2) -> dict:
+    """Richer Projects payload: verdict, tier, cost/context numbers (plan 07).
+
+    Requires the ``board_sync_v2`` flag. Pure — the ``gh``/Projects call that
+    ships the payload stays in the sync script, same split as ``sync_record``.
+    """
+    from smallworks.phase2 import Phase2Disabled
+
+    if not phase2.board_sync_v2:
+        raise Phase2Disabled("board_sync_v2 flag is off")
+    return {
+        "task": record.task_id,
+        "status": record.status,
+        "role": record.role,
+        "model": record.model,
+        "attempt": record.attempt,
+        "tests": record.test_status,
+        "latest": record.latest_report,
+        "artefacts": list(record.artefacts),
+        "cost_tokens": record.cost_tokens,
+        "dependencies": list(record.dependencies),
+    }
+
+
 def sync_record(record: BoardRecord, *, repo: str, project: str | None = None) -> str:
     """Create/update a GitHub Issue for ``record`` via ``gh``. Returns issue URL."""
     log = logger.bind(component="board", task_id=record.task_id, repo=repo)
@@ -38,7 +62,6 @@ def sync_record(record: BoardRecord, *, repo: str, project: str | None = None) -
         "gh", "issue", "create",
         "--repo", repo,
         "--title", f"[{record.task_id}] {record.status}",
-        "--body", body,
     ]
     log.debug("syncing board record status={}", record.status)
     try:

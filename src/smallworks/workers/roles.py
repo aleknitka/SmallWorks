@@ -22,6 +22,7 @@ from smallworks.config import WorkerConfig
 from smallworks.gateway import Gateway
 from smallworks.logging import logger
 from smallworks.schemas import (
+    Blueprint,
     ImplementationTask,
     ModuleSpec,
     Patch,
@@ -147,8 +148,26 @@ def writer_task(task: ImplementationTask, patch: Patch, gateway: Gateway) -> str
     return text.strip()
 
 
+def architect_task(idea: str, gateway: Gateway, *, overview: str = "") -> Blueprint:
+    """Frontier Architect: idea + Repomix overview -> validated Blueprint (plan 07)."""
+    log = logger.bind(component="workers", role="architect")
+    data = _parse_json(
+        _ask(gateway, "architect", prompts.architect_prompt(idea, overview), task_id="PLAN-0")[0],
+        role="architect",
+        task_id="PLAN-0",
+    )
+    try:
+        blueprint = Blueprint.model_validate(data)
+    except ValidationError as exc:
+        log.error("architect blueprint invalid: {}", exc)
+        raise WorkerError(f"architect blueprint invalid: {exc}") from exc
+    log.debug("blueprint project={} modules={}", blueprint.project, len(blueprint.modules))
+    return blueprint
+
+
 __all__ = [
     "WorkerError",
+    "architect_task",
     "developer_task",
     "engineer_task",
     "reviewer_task",

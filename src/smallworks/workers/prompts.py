@@ -12,10 +12,21 @@ from smallworks.schemas import ImplementationTask, ModuleSpec, Patch, TestReport
 JSON_ONLY = "Reply with exactly one JSON object, no prose, no fences."
 
 
+def architect_prompt(idea: str, overview: str) -> str:
+    return (
+        "Turn this idea into a Blueprint: modules, boundaries, dependencies, "
+        "interfaces, constraints, acceptance criteria. "
+        f"{JSON_ONLY} Shape: "
+        '{"project": "<name>", "modules": [{"name": "<m>", "responsibility": "...", '
+        '"interface": "...", "acceptance_criteria": ["..."]}], "dependencies": [], '
+        '"acceptance_criteria": ["..."]}. '
+        f"Idea: {idea}. Repo overview: {overview}"
+    )
+
+
 def engineer_prompt(module: ModuleSpec) -> str:
     return (
         "Break this Blueprint module into bounded implementation tasks. "
-        f"{JSON_ONLY} Shape: "
         '{"tasks": [{"task_id": "PREFIX-1", "module": "<name>", "behaviour": "...", '
         '"allowed_files": ["src/..."], "acceptance_criteria": ["..."]}]}. '
         f"Module: {module.name}: {module.responsibility}. "

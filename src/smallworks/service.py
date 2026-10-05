@@ -90,11 +90,41 @@ def post_control(run_id: str, body: ControlIn) -> dict:
     )
     return {"run_id": run_id, "state": state}
 
-
 @app.get("/api/tasks/{task_id}/cost")
 def get_cost(task_id: str) -> dict:
     cost, inp, out = STORE.cost_for_task(task_id)
     return {"task_id": task_id, "cost": cost, "input_tokens": inp, "output_tokens": out}
+
+
+@app.get("/api/runs/{run_id}/events")
+def run_events(run_id: str):
+    """SSE stream of run snapshots (plan 07); same data as polling, pushed.
+
+    Requires the ``event_stream`` flag. Polling ``GET /api/runs/{id}`` stays
+    the default UI path with all flags off.
+    """
+    from fastapi.responses import StreamingResponse
+
+    from smallworks.phase2 import Phase2Disabled, load_phase2
+
+    try:
+        if not load_phase2().event_stream:
+            raise Phase2Disabled("event_stream flag is off")
+    except Phase2Disabled as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    run = STORE.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="unknown run")
+    logger.bind(component="service", route="run_events", run_id=run_id).debug("stream start")
+
+    def gen():
+        import json as _json
+
+        snapshot = run.model_dump(mode="json")
+        yield f"event: snapshot\ndata: {_json.dumps(snapshot)}\n\n"
+        yield "event: end\ndata: {}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.get("/", response_class=HTMLResponse)

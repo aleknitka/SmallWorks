@@ -78,8 +78,9 @@ frontier-first for decisions, self-hosted-first for execution.
 ```text
 src/smallworks/   control layer (cli.py, config.py, context.py, gateway.py,
                   logging.py, schemas.py, service.py, store.py, adapters/,
-                  workers/ role prompts, workflow.py TAKT loop, worktrees.py)
-configs/          models.yaml (group routing), workers.yaml (roles), factory.yaml (autonomy)
+                  workers/ role prompts (incl. Architect), workflow.py TAKT loop,
+                  worktrees.py, phase2.py flag-gated extensions)
+configs/          models.yaml (group routing), workers.yaml (roles), factory.yaml (autonomy + phase2 flags)
 logs/             loguru file sink (smallworks.log, gitignored, ./logs:/app/logs in compose)
 docs/spec/        system specification (normative)
 docs/plans/       phased implementation plans
@@ -186,9 +187,23 @@ cost or context); `save_report`/`load_report` persist comparison + raw
 outputs so a re-run reproduces the verdict. Deterministic: seeded retries,
 isolated worktrees per attempt. Findings feed plan 07; no auto-tuning here.
 
-## MVP scope / non-goals
+## Phase 2 extensions (Phase 07, flag-gated)
+
+`src/smallworks/phase2.py` holds every spec §15 item behind a flag (all off =
+MVP unchanged). Enable via `factory.yaml` `phase2:` mapping or
+`SMALLWORKS_PHASE2` env (`architect,release_gate`, …): Architect
+(frontier idea → `Blueprint`, human approves via `blueprint` gate); bounded
+decision routing (`route_choice`, deterministic overrides rule);
+dynamic tier escalation (`next_tier`, `NeedsHuman` past large) + cheapest-first
+`rank_by_cost` + `BenchmarkStore` measured stats; `tune_budget` +
+`keyword_recall` (same packet/adapter interfaces); `request_release` /
+`can_release` / `merge_allowed` (human approval required, never autonomous);
+richer `board.sync_payload_v2`; SSE `GET /api/runs/{id}/events`. Each item
+ships with an `eval_delta` verdict (BETTER/NEUTRAL/WORSE) against the plan-06
+baseline before becoming default.
 
 MVP: TAKT + Pi + LiteLLM + Ollama/vLLM + RTK + Serena + Repomix, Engineer/Developer/
 Tester/Reviewer roles, Git worktrees, GitHub Issues/Projects, structured artefacts,
 basic telemetry. NOT building: custom web UI, long-term semantic memory, autonomous
-PR merging, agent societies. Architect role and Clef/Jev routing are Phase 2.
+PR merging, agent societies. Architect role, bounded decision routing, dynamic
+escalation, and release gating ship flag-gated (Phase 07, all off by default).
