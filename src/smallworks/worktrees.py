@@ -56,6 +56,21 @@ def worktree_for(task_id: str, *, root: str | None = None, branch: str | None = 
             text=True,
             timeout=60,
         )
+        if proc.returncode != 0 and target.exists():
+            # Stale dir from a killed run (admin entry pruned, files left):
+            # clear once and retry instead of failing the task.
+            log.warning("clearing stale worktree dir {}", target)
+            shutil.rmtree(target, ignore_errors=True)
+            subprocess.run(
+                ["git", "-C", str(git_top), "worktree", "prune"],
+                capture_output=True, text=True, timeout=30,
+            )
+            proc = subprocess.run(
+                ["git", "-C", str(git_top), "worktree", "add", "--detach", str(target)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
         if proc.returncode != 0:
             log.error("git worktree add failed: {}", proc.stderr.strip())
             raise WorktreeError(f"git worktree add failed: {proc.stderr.strip()}")
