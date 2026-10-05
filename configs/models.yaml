@@ -1,45 +1,41 @@
-# Logical model groups → deployments (spec §4).
+# Logical model groups -> deployments (spec §4).
 # Workers reference group names only, never provider IDs.
 #
-# Each deployment routes as role → group → provider → endpoint → model:
-#   provider: vendor key in configs/providers.yaml (ollama, vllm, litellm, github, openai)
-#   endpoint: optional override of the provider's base_url for this deployment
-#   model: model id sent on the wire (e.g. "qwen2.5-coder-8b", "openai/gpt-4o-mini")
-#   params: optional per-call params merged into the chat request (temperature, …)
-# `name: "provider/model"` stays as a legacy shorthand; explicit fields win.
-#
-# Factory policy: routine execution runs self-hosted-first (cheap, private,
-# fast); frontier models decide and rescue (orchestration, architecture,
-# escalations, disputed reviews). `class` marks each deployment; order =
-# default preference. Full autonomy bounds live in configs/factory.yaml.
+# Local-first: every group leads with installed Ollama models and falls back
+# to OpenRouter (key in $OPENROUTER_API_KEY or .env; model id is yours to
+# pick, e.g. "openai/gpt-4o-mini" or "anthropic/claude-3-5-sonnet").
+# `class` marks each deployment; order = default preference.
 models:
-  # Frontier-first: orchestrator triage, architect blueprints.
+  # Local reasoning first (gpt-oss 20B); cloud fallback when you pick a model.
   strong_reasoning:
-    - provider: litellm
-      model: frontier-reasoning
-      class: frontier
-    - name: ollama/llama3.1-70b
+    - provider: ollama
+      model: gpt-oss:latest
       class: self-hosted
-  # Self-hosted-first: plan breakdown; escalate to frontier on retry.
+    - provider: openrouter
+      model: openrouter/fallback-reasoning
+      class: frontier
+  # Local planning (mistral-nemo 12B, 1M ctx); cloud fallback.
   engineering:
-    - name: ollama/qwen2.5-coder-27b
+    - provider: ollama
+      model: mistral-nemo:12b
       class: self-hosted
-    - provider: litellm
-      model: frontier-engineering
+    - provider: openrouter
+      model: openrouter/fallback-engineering
       class: frontier
-  # Self-hosted-first: bounded implementation and test execution.
+  # Local execution (ornith); cloud fallback.
+  # Note: clef-flash is completion-only (no /chat/completions) — not routable.
   coder_fast:
-    - name: ollama/qwen2.5-coder-8b
+    - provider: ollama
+      model: ornith:latest
       class: self-hosted
-    - name: vllm/qwen2.5-coder-14b
-      class: self-hosted
-    - provider: litellm
-      model: frontier-coder
+    - provider: openrouter
+      model: openrouter/fallback-coder
       class: frontier
-  # Self-hosted-first: routine review; frontier breaks ties / escalations.
+  # Local review (mistral-nemo 12B); cloud fallback breaks ties.
   reviewer:
-    - name: ollama/qwen2.5-coder-27b
+    - provider: ollama
+      model: mistral-nemo:12b
       class: self-hosted
-    - provider: litellm
-      model: frontier-reviewer
+    - provider: openrouter
+      model: openrouter/fallback-reviewer
       class: frontier

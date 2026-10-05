@@ -22,8 +22,10 @@ def test_model_groups_prefer_class_order():
             assert dep.provider in KNOWN_PROVIDERS, (group, d)
             assert dep.model, (group, d)
             assert dep.model_class in VALID_CLASSES, (group, d)
-    # Factory policy: frontier decides first, self-hosted executes first.
-    assert cfg["strong_reasoning"][0]["class"] == "frontier"
+    # Local-first: every group leads self-hosted, falls back to frontier
+    # (OpenRouter slot until a model id is picked).
+    assert cfg["strong_reasoning"][0]["class"] == "self-hosted"
+    assert cfg["strong_reasoning"][-1]["provider"] == "openrouter"
     assert cfg["coder_fast"][0]["class"] == "self-hosted"
     assert cfg["engineering"][0]["class"] == "self-hosted"
 

@@ -11,17 +11,18 @@ from pydantic import BaseModel, Field, model_validator
 DeploymentClass = Literal["frontier", "self-hosted"]
 Tier = Literal["small", "medium", "large"]
 
-KNOWN_PROVIDERS: tuple[str, ...] = ("ollama", "vllm", "litellm", "github", "openai")
+KNOWN_PROVIDERS: tuple[str, ...] = ("ollama", "vllm", "litellm", "github", "openai", "openrouter")
 PROVIDER_DEFAULT_BASES: dict[str, str] = {
     "ollama": "http://localhost:11434/v1",
     "vllm": "http://localhost:8001/v1",
     "litellm": "http://localhost:4000/v1",
     "github": "https://models.github.ai/inference",
     "openai": "https://api.openai.com/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
 }
 # Providers that need an API key unless talking to a local override.
 # Keys are resolved env-first (or .env), never stored in YAML.
-PROVIDERS_REQUIRING_KEY: frozenset[str] = frozenset({"litellm", "github", "openai"})
+PROVIDERS_REQUIRING_KEY: frozenset[str] = frozenset({"litellm", "github", "openai", "openrouter"})
 
 
 class ProviderConfig(BaseModel):
@@ -38,6 +39,7 @@ DEFAULT_API_KEY_ENVS: dict[str, str] = {
     "litellm": "LITELLM_API_KEY",
     "github": "GITHUB_TOKEN",
     "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
 }
 
 

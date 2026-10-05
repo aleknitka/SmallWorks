@@ -1,11 +1,14 @@
 # Provider endpoint slots: base URL + env var holding the API key (spec §4).
-# Keys are NEVER stored here — set them in the app (Tube → Providers) or in
-# `.env` (`GITHUB_TOKEN`, `OPENAI_API_KEY`, …); `.env` is always gitignored.
-# Ships with ONE local slot; add more with [+] on the settings page (any
-# known vendor: ollama, vllm, litellm, github, openai). Omitted vendors fall
-# back to built-in defaults until added. `api_key_env: ""` = no key is sent.
+# Keys are NEVER stored here — put OPENROUTER_API_KEY in $env or `.env`
+# (gitignored), or set it on the Tube page; local Ollama needs no key.
+# Ships with local Ollama + one OpenRouter slot: pick the model id in
+# `models.yaml` (`openrouter/...`) or override per-deployment `endpoint`.
 providers:
   ollama:
     base_url: http://localhost:11434/v1
     api_key_env: ""
-    default_model: qwen2.5-coder-8b
+    default_model: mistral-nemo:12b
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    default_model: ""

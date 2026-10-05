@@ -75,17 +75,18 @@ def test_providers_defaults_when_file_missing(tmp_path: Path):
 def test_shipped_providers_load_with_key_envs():
     from smallworks.config import load_configs, load_providers
 
-    # Ships with ONE local slot; the rest resolve from built-in defaults.
+    # Ships with local Ollama + one OpenRouter slot; the rest resolve defaults.
     slots = load_providers(REPO / "configs" / "providers.yaml")
-    assert set(slots) == {"ollama"}
+    assert set(slots) == {"ollama", "openrouter"}
     assert slots["ollama"].api_key_env == ""  # local: no key sent
+    assert slots["openrouter"].api_key_env == "OPENROUTER_API_KEY"
     loaded = load_configs(
         REPO / "configs" / "models.yaml",
         REPO / "configs" / "workers.yaml",
         REPO / "configs" / "providers.yaml",
     )
     assert loaded.providers["github"].base_url.startswith("https://")
-    assert loaded.providers["github"].api_key_env == "GITHUB_TOKEN"
+    assert loaded.providers["openrouter"].base_url.startswith("https://openrouter.ai/")
 
 
 def test_unknown_provider_in_models_fails_fast(tmp_path: Path):

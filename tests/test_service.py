@@ -83,7 +83,7 @@ def test_groups_show_provider_routing():
     body = client.get("/api/models/groups").json()
     assert body["roles"]["developer"] == "coder_fast"
     first = body["groups"]["strong_reasoning"][0]
-    assert first["provider"] == "litellm" and first["model"] == "frontier-reasoning"
+    assert first["provider"] == "ollama" and first["model"] == "gpt-oss:latest"
 
 
 def test_put_providers_rejects_unknown():
