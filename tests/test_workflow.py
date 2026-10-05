@@ -123,6 +123,52 @@ def test_two_modules_run_concurrently(tmp_path):
     assert all(r.outcome == TaskOutcome.PASSED for r in results)
 
 
+def _dep_task(task_id: str, *deps: str) -> ImplementationTask:
+    task = _task(task_id)
+    return ImplementationTask(
+        task_id=task.task_id,
+        module=task.module,
+        behaviour=task.behaviour,
+        allowed_files=task.allowed_files,
+        acceptance_criteria=task.acceptance_criteria,
+        depends_on=list(deps),
+    )
+
+
+def test_diamond_dependency_runs_in_waves(tmp_path):
+    gw = _gateway(_texts())
+    leaf = _dep_task("AUTH-017")
+    mid_a = _dep_task("AUTH-018", "AUTH-017")
+    mid_b = _dep_task("AUTH-019", "AUTH-017")
+    top = _dep_task("AUTH-020", "AUTH-018", "AUTH-019")
+    results = run_workflow([top, mid_b, mid_a, leaf], gw, max_workers=2, worktree_root=str(tmp_path))
+    assert [r.task_id for r in results] == ["AUTH-020", "AUTH-019", "AUTH-018", "AUTH-017"]
+    assert all(r.outcome == TaskOutcome.PASSED for r in results)
+
+
+def test_failed_dependency_blocks_dependent_without_running(tmp_path):
+    gw = _gateway(_texts(pass_tests=False))
+    leaf = _dep_task("AUTH-017")
+    top = _dep_task("AUTH-018", "AUTH-017")
+    results = run_workflow([leaf, top], gw, max_workers=2, worktree_root=str(tmp_path))
+    assert results[1].outcome == TaskOutcome.ESCALATED
+    assert results[1].attempts == 0
+    assert "AUTH-017" in results[1].decision.reason
+
+
+def test_unknown_dependency_fails_fast(tmp_path):
+    gw = _gateway(_texts())
+    with __import__("pytest").raises(ValueError, match="unknown task"):
+        run_workflow([_dep_task("AUTH-017", "AUTH-999")], gw, worktree_root=str(tmp_path))
+
+
+def test_dependency_cycle_fails_fast(tmp_path):
+    gw = _gateway(_texts())
+    tasks = [_dep_task("AUTH-017", "AUTH-018"), _dep_task("AUTH-018", "AUTH-017")]
+    with __import__("pytest").raises(ValueError, match="cycle"):
+        run_workflow(tasks, gw, worktree_root=str(tmp_path))
+
+
 def test_developer_out_of_scope_rejected(tmp_path):
     texts = _texts()
     texts["developer"] = json.dumps({"files_changed": ["/etc/passwd"], "summary": "evil"})

@@ -143,6 +143,26 @@ class Workflow:
             log.debug("retrying task (attempt {}/{})", attempts, self.max_retries + 1)
 
 
+def _waves(tasks: list[ImplementationTask]) -> list[list[ImplementationTask]]:
+    """Topological waves over ``depends_on``; unknown deps and cycles fail fast."""
+    by_id = {t.task_id: t for t in tasks}
+    for t in tasks:
+        for dep in t.depends_on:
+            if dep not in by_id:
+                raise ValueError(f"task {t.task_id} depends on unknown task {dep!r}")
+    remaining = {t.task_id for t in tasks}
+    done: set[str] = set()
+    waves: list[list[ImplementationTask]] = []
+    while remaining:
+        ready = sorted(tid for tid in remaining if all(d in done for d in by_id[tid].depends_on))
+        if not ready:
+            raise ValueError(f"dependency cycle among tasks: {sorted(remaining)}")
+        waves.append([by_id[tid] for tid in ready])
+        done.update(ready)
+        remaining.difference_update(ready)
+    return waves
+
+
 def run_workflow(
     tasks: list[ImplementationTask],
     gateway: Gateway,
@@ -151,17 +171,55 @@ def run_workflow(
     max_workers: int = 4,
     worktree_root: str | None = None,
 ) -> list[TaskResult]:
-    """Run independent module tasks concurrently; each keeps its gated sequence."""
+    """Run tasks in dependency waves; each wave fans out, each keeps its gated sequence.
+
+    A task whose dependency did not pass is escalated without running, naming
+    the unmet dependency.
+    """
     log = logger.bind(component="workflow", tasks=[t.task_id for t in tasks])
     log.debug("fan-out {} tasks workers={}", len(tasks), max_workers)
-    if len(tasks) == 1:
-        return [Workflow(gateway, max_retries, worktree_root).run_task(tasks[0])]
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(tasks))) as pool:
-        futures = [
-            pool.submit(Workflow(gateway, max_retries, worktree_root).run_task, t)
-            for t in tasks
+    by_id = {t.task_id: t for t in tasks}
+    outcomes: dict[str, TaskResult] = {}
+    for wave in _waves(tasks):
+        runnable = [
+            t
+            for t in wave
+            if all(
+                outcomes[d].outcome == TaskOutcome.PASSED for d in t.depends_on
+            )
         ]
-        return [f.result() for f in futures]
+        for t in wave:
+            if t not in runnable:
+                unmet = [d for d in t.depends_on if outcomes[d].outcome != TaskOutcome.PASSED]
+                outcomes[t.task_id] = TaskResult(
+                    t.task_id,
+                    TaskOutcome.ESCALATED,
+                    0,
+                    Decision(
+                        task_id=t.task_id,
+                        action="escalate",
+                        reason=f"blocked: dependencies did not pass: {unmet}",
+                    ),
+                    None,
+                    None,
+                    None,
+                    ["request", "done"],
+                )
+                log.debug("task {} blocked by {}", t.task_id, unmet)
+        if len(runnable) == 1:
+            outcomes[runnable[0].task_id] = Workflow(gateway, max_retries, worktree_root).run_task(
+                runnable[0]
+            )
+        elif runnable:
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(runnable))) as pool:
+                futures = {
+                    pool.submit(Workflow(gateway, max_retries, worktree_root).run_task, t): t
+                    for t in runnable
+                }
+                for f, t in futures.items():
+                    outcomes[t.task_id] = f.result()
+    _ = by_id
+    return [outcomes[t.task_id] for t in tasks]
 
 
 __all__ = ["TaskOutcome", "TaskResult", "TaskState", "Workflow", "run_workflow"]

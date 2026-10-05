@@ -61,6 +61,7 @@ class ImplementationTask(BaseModel):
     behaviour: str = Field(min_length=1)
     allowed_files: list[str] = Field(min_length=1)
     acceptance_criteria: list[str] = Field(min_length=1)
+    depends_on: list[str] = Field(default_factory=list)
 
 
 class EngineeringPlan(BaseModel):
