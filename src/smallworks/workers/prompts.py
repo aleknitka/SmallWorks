@@ -34,11 +34,12 @@ def engineer_prompt(module: ModuleSpec) -> str:
         f"CONTRACT (the Architect's binding interface — every task must serve it):\n{module.interface}\n"
         f"RESPONSIBILITY: {module.responsibility}.\n"
         f"ACCEPTANCE (each criterion needs at least one task that proves it):\n{acc}\n"
-        "RULES: task_ids PREFIX-N (PREFIX = module name uppercased, e.g. RETRY-1); "
-        "each task touches 1-2 files under src/smallworks/; allowed_files MUST be "
-        "concrete paths; acceptance_criteria MUST be executable checks. "
+        "RULES: task_ids like RETRY-001 (letters, dash, at least 3 digits — "
+        "RETRY-1 is invalid); each task touches 1-2 files under src/smallworks/; "
+        "allowed_files MUST be concrete paths; acceptance_criteria MUST be executable checks. "
+        "Do NOT redesign the CONTRACT: task behaviour MUST call the interface as specified. "
         f"{JSON_ONLY} Shape: "
-        '{"tasks": [{"task_id": "PREFIX-1", "module": "<name>", "behaviour": "...", '
+        '{"tasks": [{"task_id": "RETRY-001", "module": "<name>", "behaviour": "...", '
         '"allowed_files": ["src/..."], "acceptance_criteria": ["..."]}]}.'
     )
 
