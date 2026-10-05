@@ -102,6 +102,18 @@ def test_test_failure_retries_then_escalates(tmp_path):
     assert result.attempts == 2  # initial + 1 retry, then budget spent
     assert "retry budget" in result.decision.reason
 
+def test_parse_tolerates_dropped_trailing_braces():
+    from smallworks.workers.roles import _parse_json
+
+    # ornith emits complete JSON then drops the closing fence + braces
+    body = (
+        '```json\n{"files_changed": ["a.py"], "summary": "s", '
+        '"contents": {"a.py": "x = 1\\n"}}\n```'
+    )
+    assert _parse_json(body, role="developer", task_id="T-0")["files_changed"] == ["a.py"]
+    bare = '{"files_changed": ["a.py"], "summary": "s", "contents": {"a.py": "x = 1\\n"}'
+    assert _parse_json(bare, role="developer", task_id="T-0")["files_changed"] == ["a.py"]
+
 
 def test_reviewer_escalate_escalates(tmp_path):
     gw = _gateway(_texts(verdict="ESCALATE"))

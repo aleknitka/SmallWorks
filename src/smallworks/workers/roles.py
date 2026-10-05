@@ -76,12 +76,15 @@ def _parse_json(text: str, *, role: str, task_id: str) -> dict:
         if end > start:
             candidates.append(text[start:end])
     for candidate in candidates:
-        try:
-            data = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict):
-            return data
+        for fixed in (candidate, candidate + "}", candidate + "}}"):
+            try:
+                data = json.loads(fixed)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict):
+                if fixed != candidate:
+                    log.warning("repaired {} output by appending brace(s)", role)
+                return data
     log.error("unparseable {} output", role)
     raise WorkerError(f"{role} returned unparseable JSON")
 

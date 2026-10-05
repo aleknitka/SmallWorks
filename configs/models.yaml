@@ -50,7 +50,7 @@ models:
       - provider: ollama
         model: ornith:latest
         class: self-hosted
-        params: {temperature: 0, num_predict: 8192}
+        params: {temperature: 0, num_predict: 8192, num_ctx: 16384}
       - provider: ollama
         model: qwen3.5:latest
         class: self-hosted
