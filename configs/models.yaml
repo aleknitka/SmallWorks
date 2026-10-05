@@ -17,9 +17,11 @@ models:
       - provider: ollama
         model: gpt-oss:latest
         class: self-hosted
+        params: {temperature: 0, num_predict: 4096}
       - provider: ollama
         model: mistral-nemo:12b
         class: self-hosted
+        params: {temperature: 0, num_predict: 4096}
       - provider: openrouter
         model: openrouter/fallback-reasoning
         class: frontier
@@ -30,9 +32,11 @@ models:
       - provider: ollama
         model: mistral-nemo:12b
         class: self-hosted
+        params: {temperature: 0, num_predict: 4096}
       - provider: ollama
         model: ornith:latest
         class: self-hosted
+        params: {temperature: 0, num_predict: 4096}
       - provider: huggingface
         model: YOUR-HF-MODEL-HERE
         class: frontier
@@ -46,9 +50,11 @@ models:
       - provider: ollama
         model: ornith:latest
         class: self-hosted
+        params: {temperature: 0, num_predict: 4096}
       - provider: ollama
         model: mistral-nemo:12b
         class: self-hosted
+        params: {temperature: 0, num_predict: 4096}
       - provider: openrouter
         model: openrouter/fallback-coder
         class: frontier
@@ -59,6 +65,7 @@ models:
       - provider: ollama
         model: mistral-nemo:12b
         class: self-hosted
+        params: {temperature: 0, num_predict: 4096}
       - provider: openrouter
         model: openrouter/fallback-reviewer
         class: frontier

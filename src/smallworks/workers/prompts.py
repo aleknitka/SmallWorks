@@ -35,9 +35,13 @@ def engineer_prompt(module: ModuleSpec) -> str:
     )
 
 
-def developer_prompt(task: ImplementationTask, symbols: list[str] | None = None) -> str:
+def developer_prompt(
+    task: ImplementationTask,
+    symbols: list[str] | None = None,
+    existing: dict[str, str] | None = None,
+) -> str:
     syms = "; ".join(symbols or [])
-    return (
+    base = (
         f"Implement task {task.task_id} in module {task.module}: {task.behaviour}. "
         f"Touch ONLY these files: {', '.join(task.allowed_files)}. "
         f"Acceptance: {'; '.join(task.acceptance_criteria)}. "
@@ -45,6 +49,14 @@ def developer_prompt(task: ImplementationTask, symbols: list[str] | None = None)
         '{"files_changed": ["src/..."], "summary": "<one line>", '
         '"contents": {"<path>": "<COMPLETE new file text>"}}. '
         "contents MUST hold every changed file in full; an unwritten file fails verification."
+    )
+    if not existing:
+        return base
+    current = "\n".join(
+        f"--- {path} ---\n{text}" for path, text in existing.items()
+    )
+    return (
+        f"{base}\nCurrent file content (edit from this; keep unrelated code intact):\n{current}"
     )
 
 

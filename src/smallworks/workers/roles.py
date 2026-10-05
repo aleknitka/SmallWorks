@@ -107,11 +107,14 @@ def engineer_task(module: ModuleSpec, gateway: Gateway, worker: WorkerConfig) ->
 
 
 def developer_task(
-    task: ImplementationTask, gateway: Gateway, *, symbols: list[str] | None = None
+    task: ImplementationTask, gateway: Gateway, *, symbols: list[str] | None = None,
+    existing: dict[str, str] | None = None,
 ) -> Patch:
     log = logger.bind(component="workers", role="developer", task_id=task.task_id)
+    prompt = prompts.developer_prompt(task, symbols, existing)
+    log.debug("developer prompt chars={} existing_files={}", len(prompt), sorted((existing or {})))
     data = _parse_json(
-        _ask(gateway, "developer", prompts.developer_prompt(task, symbols), task_id=task.task_id)[0],
+        _ask(gateway, "developer", prompt, task_id=task.task_id)[0],
         role="developer",
         task_id=task.task_id,
     )

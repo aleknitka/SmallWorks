@@ -68,9 +68,25 @@ class TaskResult:
     states: list[str] = field(default_factory=list)
 
 
+def _read_existing(task: ImplementationTask, workdir: object) -> dict[str, str]:
+    """Current text of in-scope files the developer may touch (missing = absent)."""
+    from pathlib import Path
+
+    root = Path(str(workdir))
+    existing: dict[str, str] = {}
+    for name in task.allowed_files:
+        if not name.endswith(".py"):
+            continue
+        candidate = root / name
+        if candidate.is_file():
+            try:
+                existing[name] = candidate.read_text(encoding="utf-8")
+            except OSError:
+                continue
+    return existing
+
 def _apply_patch(task: ImplementationTask, patch: Patch, workdir: object, *, verify: bool = False) -> None:
     """Materialize ``patch.contents`` under ``workdir``.
-
     Under ``verify`` every entry of ``files_changed`` needs full text in
     ``contents`` — a patch that names files without writing them is
     unverifiable and rejected. Scripted runs (``verify=False``) skip
@@ -117,7 +133,10 @@ class Workflow:
                 states.append(TaskState.DEVELOP)
                 try:
                     with worktree_for(task.task_id, root=self.worktree_root) as workdir:
-                        last_patch = developer_task(task, self.gateway, symbols=symbols)
+                        last_patch = developer_task(
+                            task, self.gateway, symbols=symbols,
+                            existing=_read_existing(task, workdir),
+                        )
                         _apply_patch(task, last_patch, workdir, verify=self.verify)
                         states.append(TaskState.TEST)
                         last_report = tester_task(task, last_patch, self.gateway,

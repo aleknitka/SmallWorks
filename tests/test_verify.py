@@ -140,3 +140,57 @@ def test_workflow_rejects_claimed_pass_without_execution(tmp_path):
                                    verify=True).run_task(_task())
     assert result.decision.action != "pass"
     assert result.test_report is not None and result.test_report.tests_run == 0
+
+
+def test_prompt_carries_existing_file_text():
+    from smallworks.workers.prompts import developer_prompt
+
+    task = _task()
+    plain = developer_prompt(task, None)
+    assert "Current file content" not in plain
+    rich = developer_prompt(task, None, {"src/smallworks/textutils.py": "X = 1\n"})
+    assert "--- src/smallworks/textutils.py ---" in rich and "X = 1" in rich
+
+
+def test_read_existing_skips_missing_and_non_python(tmp_path):
+    from smallworks.workflow import _read_existing
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "have.py").write_text("Y = 2\n", encoding="utf-8")
+    got = _read_existing(
+        _task(allowed_files=["src/have.py", "src/missing.py", "docs/notes.md"]), tmp_path)
+    assert got == {"src/have.py": "Y = 2\n"}
+
+
+def test_temperature_zero_reaches_wire_payload():
+    from smallworks.gateway import OpenAICompatibleTransport, resolve_endpoint
+    from smallworks.config import default_config_dir, load_configs
+
+    d = default_config_dir()
+    cfg = load_configs(d / "models.yaml", d / "workers.yaml", d / "providers.yaml")
+    local = [x for x in cfg.models["coder_fast"] if x.provider == "ollama"][0]
+    assert local.params.get("temperature") == 0
+    resolved = resolve_endpoint(local, cfg.providers)
+    assert resolved.params.get("temperature") == 0
+    seen = {}
+
+    class SpyTransport(OpenAICompatibleTransport):
+        def complete(self, deployment, prompt, *, task_id):
+            import httpx
+
+            orig = httpx.post
+            def spy(url, json=None, **kw):
+                seen.update(json)
+                raise RuntimeError("stop before network")
+
+            httpx.post = spy
+            try:
+                return super().complete(deployment, prompt, task_id=task_id)
+            finally:
+                httpx.post = orig
+
+    try:
+        SpyTransport().complete(local, "hi", task_id="T-0")
+    except RuntimeError:
+        pass
+    assert seen.get("temperature") == 0
