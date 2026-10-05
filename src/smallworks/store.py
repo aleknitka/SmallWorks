@@ -111,6 +111,23 @@ class Store:
         self._raw = RecallStore()
         self._save_dir = save_dir
         self._seed_showcase()
+        self._seed_todos()
+
+    def _seed_todos(self) -> None:
+        """Roadmap cards so the board has content on first boot (mirrors _seed_showcase)."""
+        for tid, title, detail in (
+            ("retry-vertical-slice", "Run RETRY-001..004 through developer loop",
+             "gpt-oss plan -> ornith -> gates"),
+            ("wire-writer-role", "Wire writer role into workflow WRITE state",
+             "nemo on reviewer pool; see roster open wiring"),
+            ("fixture-blueprint-e2e", "Fixture Blueprint end-to-end on live models",
+             "happy-path / retry / escalate / concurrent (plan 04 s5)"),
+            ("phase2-eval-delta", "Phase-2 flags with eval-delta",
+             "plan 07; needs user go-ahead per flag"),
+            ("container-build", "Container build via podman/host",
+             "plan 08; no engine on this machine"),
+        ):
+            self._todos[tid] = Todo(id=tid, title=title, detail=detail)
 
     def _seed_showcase(self) -> None:
         """Two static fixture runs so the console has depth on first boot."""

@@ -148,10 +148,11 @@ def test_assign_model_rejected_for_unknown_role():
 
 
 def test_todos_crud_and_move():
-    assert client.get("/api/todos").json() == {"todos": []}
-    saved = client.put("/api/todos", json={"id": "wire-writer", "title": "Wire writer role"}).json()
-    assert [t["id"] for t in saved["todos"]] == ["wire-writer"]
-    moved = client.post("/api/todos/wire-writer/move", json={"status": "running"}).json()
+    seeded = {t["id"] for t in client.get("/api/todos").json()["todos"]}
+    assert "wire-writer-role" in seeded  # roadmap seeds ship by default
+    saved = client.put("/api/todos", json={"id": "todo-trial", "title": "Trial card"}).json()
+    assert "todo-trial" in [t["id"] for t in saved["todos"]]
+    moved = client.post("/api/todos/todo-trial/move", json={"status": "running"}).json()
     assert moved["status"] == "running"
-    assert client.post("/api/todos/wire-writer/move", json={"status": "done-ish"}).status_code == 422
+    assert client.post("/api/todos/todo-trial/move", json={"status": "done-ish"}).status_code == 422
     assert client.post("/api/todos/nope/move", json={"status": "passed"}).status_code == 404
