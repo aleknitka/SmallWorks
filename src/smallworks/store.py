@@ -71,6 +71,17 @@ class Store:
         self._runs: dict[str, Run] = {"demo": demo}
         self._raw = RecallStore()
         self._save_dir = save_dir
+        self._seed_showcase()
+
+    def _seed_showcase(self) -> None:
+        """Two static fixture runs so the console has depth on first boot."""
+        for run_id, task_id, status in (("nostromo-1", "AUTH-017", TaskStatus.RUNNING),
+                                        ("nostromo-2", "AUTH-018", TaskStatus.BLOCKED)):
+            run = Run(run_id=run_id, task_id=task_id, status=status,
+                      worker="developer", model="ollama/fast-a")
+            run.chat = ChatThread(run_id=run_id)
+            run.state = {"status": "paused" if status == TaskStatus.BLOCKED else "running"}
+            self._runs[run_id] = run
 
     def list_runs(self) -> list[Run]:
         return list(self._runs.values())

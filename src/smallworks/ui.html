@@ -1,64 +1,252 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-scheme="dark">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SmallWorks</title>
+<title>SmallWorks // MU-TH-UR 6000</title>
 <style>
-  body { font: 14px/1.4 system-ui, sans-serif; margin: 2em auto; max-width: 720px; }
-  #runs li { margin: .25em 0; }
-  #chat { border: 1px solid #ccc; padding: 1em; margin-top: 1em; min-height: 8em; }
-  .u { color: #1a5fb4; } .o { color: #1a7a2e; }
-  form { display: flex; gap: .5em; margin-top: 1em; }
-  input { flex: 1; padding: .5em; }
-  #controls { display: flex; gap: .5em; margin-top: 1em; flex-wrap: wrap; }
-  #controls button { padding: .4em .8em; }
+  :root, :root[data-scheme="dark"] {
+    --bg: #0a0a0a; --bg2: #0d120f; --ph: #00ff7a; --ph-dim: #3e6a57;
+    --amber: #ffb000; --red: #ff2b2b; --ink: #c6ffdf;
+    --line: rgba(0,255,122,.18); --glow: 0 0 14px rgba(0,255,122,.08);
+    --scan: rgba(0,255,122,.045); --vig: rgba(0,0,0,.55);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  :root[data-scheme="light"] {
+    --bg: #e8e4d8; --bg2: #dfdacd; --ph: #0b5c36; --ph-dim: #7a8a7e;
+    --amber: #8a5a00; --red: #a31212; --ink: #0a1f14;
+    --line: rgba(11,92,54,.28); --glow: 0 0 0 rgba(0,0,0,0);
+    --scan: rgba(11,92,54,.03); --vig: rgba(90,80,50,.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--mono); font-size: 13px; line-height: 1.45;
+    letter-spacing: .2px; background: var(--bg); color: var(--ph);
+    margin: 0; padding: 12px; display: flex; flex-direction: column; gap: 10px;
+    min-height: 100vh;
+  }
+  /* CRT tube: scanlines + phosphor bloom + vignette */
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background:
+      repeating-linear-gradient(to bottom, var(--scan) 0 1px, transparent 1px 4px),
+      radial-gradient(120% 85% at 50% 0%, var(--scan), transparent 65%),
+      radial-gradient(120% 110% at 50% 100%, var(--vig), transparent 60%);
+  }
+  h1, h2 { font-size: 13px; letter-spacing: 2px; margin: 0 0 8px; text-transform: uppercase; }
+  h2 { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  header, footer, section {
+    border: 1px solid var(--line); background: var(--bg2);
+    padding: 10px 12px; border-radius: 8px;
+  }
+  header { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header .wordmark { color: var(--ink); font-weight: 700; }
+  header #boot { flex: 1; color: var(--ph-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header button, .key { cursor: pointer; }
+  #schemeBtn {
+    font: inherit; color: var(--ph); background: transparent;
+    border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px;
+  }
+  #schemeBtn:hover { box-shadow: var(--glow); border-color: var(--ph); }
+  :focus-visible { outline: 2px solid var(--ph); outline-offset: 2px; }
+  main { flex: 1; display: grid; grid-template-columns: 250px 1fr 330px; gap: 10px; min-height: 0; }
+  #lower { display: grid; grid-template-columns: 330px 1fr; gap: 10px; }
+  section { min-height: 0; overflow: auto; }
+  #runsList { list-style: none; margin: 0; padding: 0; }
+  #runsList li {
+    padding: 6px 8px; border: 1px solid transparent; border-radius: 4px;
+    cursor: pointer; display: flex; gap: 8px; align-items: baseline;
+  }
+  #runsList li:hover { border-color: var(--line); }
+  #runsList li.sel { border-color: var(--ph); box-shadow: var(--glow); color: var(--ink); }
+  .g { display: inline-block; width: 1.2em; }
+  .st-running { color: var(--ph); } .st-hold { color: var(--amber); }
+  .st-bad { color: var(--red); } .st-ok { color: var(--ink); }
+  dl.readout { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; }
+  dl.readout dt { color: var(--ph-dim); }
+  dl.readout dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+  #chat { min-height: 12em; max-height: 40vh; overflow-y: auto; margin-bottom: 8px; }
+  #chat p { margin: 4px 0; overflow-wrap: anywhere; }
+  #chat .u { color: var(--ink); } #chat .o { color: var(--ph); }
+  #chat .me::before { content: "> "; } #chat .ship::before { content: "< "; color: var(--ph-dim); }
+  form.cmd { display: flex; gap: 8px; }
+  form.cmd input {
+    flex: 1; font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 4px; padding: 8px;
+  }
+  form.cmd button, .key {
+    font: inherit; color: var(--ph); background: transparent;
+    border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px;
+  }
+  form.cmd button:hover, .key:not(:disabled):hover { box-shadow: var(--glow); border-color: var(--ph); }
+  .key:disabled { color: var(--ph-dim); border-color: var(--line); cursor: not-allowed; opacity: .55; }
+  .key.armed { border-color: var(--amber); color: var(--amber); box-shadow: 0 0 14px rgba(255,176,0,.15); }
+  #keybank { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .logchunk { border: 1px solid var(--line); border-radius: 4px; margin-bottom: 8px; }
+  .logchunk pre { margin: 0; padding: 8px; white-space: pre-wrap; color: var(--ink); max-height: 16em; overflow: auto; }
+  .logchunk button {
+    font: inherit; color: var(--amber); background: transparent;
+    border: none; border-top: 1px solid var(--line); width: 100%;
+    padding: 6px; cursor: pointer; text-align: left;
+  }
 </style>
-<h1>SmallWorks</h1>
-<h2>Runs</h2>
-<ul id="runs"></ul>
-<div id="controls">
-  <button data-a="pause">Pause</button>
-  <button data-a="retry">Retry</button>
-  <button data-a="escalate">Escalate</button>
-  <button data-a="approve">Approve gate</button>
-  <button data-a="reject">Reject gate</button>
+<header>
+  <span class="wordmark">SMALLWORKS // MU-TH-UR 6000</span>
+  <span id="boot">STANDBY</span>
+  <span id="pwr">PWR: NOMINAL</span>
+  <button id="schemeBtn" type="button" aria-label="Toggle colour scheme">SCHEME: DARK</button>
+</header>
+<main>
+  <section aria-label="Runs"><h2>Runs</h2><ul id="runsList"></ul></section>
+  <section aria-label="Detail"><h2>Detail</h2><dl class="readout" id="detail"><dt>TASK</dt><dd>—</dd></dl></section>
+  <section aria-label="Comms"><h2>Orchestrator chat</h2><div id="chat" aria-live="polite"></div>
+    <form class="cmd" id="chatForm"><input id="chatIn" autocomplete="off" spellcheck="false" placeholder="> command or /approve /retry /escalate" aria-label="Message the orchestrator"><button type="submit">SEND</button></form>
+  </section>
+</main>
+<div id="lower">
+  <section aria-label="Controls"><h2>Controls</h2><div id="keybank">
+    <button class="key" data-a="pause" data-n="HOLD">HOLD</button>
+    <button class="key" data-a="retry" data-n="RESUME" data-when="held">RESUME</button>
+    <button class="key" data-a="retry" data-n="RETRY">RETRY</button>
+    <button class="key" data-a="escalate" data-n="ESCALATE">ESCALATE</button>
+    <button class="key" data-a="approve" data-n="SEAL" data-when="gate">SEAL</button>
+    <button class="key" data-a="reject" data-n="REJECT" data-when="gate">REJECT</button>
+  </div></section>
+  <section aria-label="Logs"><h2>Logs</h2><div id="logs"></div></section>
 </div>
-<h2>Orchestrator chat</h2>
-<div id="chat"></div>
-<form id="f"><input id="msg" placeholder="Message the orchestrator…" autocomplete="off"><button>Send</button></form>
+<footer>BUILDING BETTER WORLDS</footer>
 <script>
-const runId = "demo";
-async function runs() {
-  const r = await fetch("/api/runs").then(r => r.json());
-  document.getElementById("runs").innerHTML =
-    r.map(x => `<li><b>${x.run_id}</b> ${x.task_id} · ${x.status} · ${x.worker} · ${x.model}</li>`).join("");
+let runId = "demo", rawCache = {}, armedBtn = null, armedTimer = 0;
+const $ = id => document.getElementById(id);
+const GLYPH = s => ({running: "►", paused: "■", blocked: "■", passed: "✓", failed: "✗"}[s] || "○");
+const GCLS = s => ({running: "st-running", paused: "st-hold", blocked: "st-hold", passed: "st-ok", failed: "st-bad"}[s] || "");
+async function boot() {
+  const lines = ["MU-TH-UR 6000 // SCIENCE OFFICER TERMINAL", "SYS.CHECK ▓▓▓▓▓▓▓░░░ 043/078", "UPLINK: LOCAL // FACTORY SUPERVISED"];
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { $("boot").textContent = lines[2]; await refresh(); stream(); return; }
+  for (const l of lines) { $("boot").textContent = l; await new Promise(r => setTimeout(r, 220)); }
+  await refresh(); stream();
 }
-async function chat() {
-  const t = await fetch(`/api/runs/${runId}/chat`).then(r => r.json());
-  document.getElementById("chat").innerHTML =
-    t.messages.map(m => `<p class="${m.role[0]}"><b>${m.role}:</b> ${m.content}</p>`).join("") || "<p><i>No messages yet.</i></p>";
+async function refresh() {
+  const runs = await fetch("/api/runs").then(r => r.json());
+  const ul = $("runsList"); ul.innerHTML = "";
+  for (const x of runs) {
+    const li = document.createElement("li");
+    if (x.run_id === runId) li.className = "sel";
+    const glyph = document.createElement("span"); glyph.className = "g " + GCLS(x.status); glyph.textContent = GLYPH(x.status);
+    const label = document.createElement("span");
+    const b = document.createElement("b"); b.textContent = x.run_id;
+    label.append(b, document.createTextNode(` ${x.task_id} · ${x.status}`));
+    li.append(glyph, label);
+    li.title = `${x.worker} · ${x.model}`;
+    li.onclick = () => select(x.run_id);
+    ul.appendChild(li);
+  }
+  if (!runs.some(x => x.run_id === runId) && runs.length) runId = runs[0].run_id;
+  await select(runId);
 }
-document.getElementById("f").onsubmit = async e => {
-  e.preventDefault();
-  const el = document.getElementById("msg");
-  if (!el.value.trim()) return;
-  await fetch(`/api/runs/${runId}/chat`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({content: el.value})});
-  el.value = "";
-  chat();
-};
-document.querySelectorAll("#controls button").forEach(b => b.onclick = async () => {
-  await fetch(`/api/runs/${runId}/control`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({action: b.dataset.a})});
-  runs();
-});
-runs(); chat();
-// Phase-2 event stream when enabled; polling stays the default with flags off.
-if (typeof EventSource !== "undefined") {
+async function select(id) {
+  runId = id; rawCache = {};
+  document.querySelectorAll("#runsList li").forEach((li, i) => li.classList.toggle("sel", li.querySelector("b").textContent === id));
+  const [run, logs, chat, ] = await Promise.all([
+    fetch(`/api/runs/${id}`).then(r => r.json()),
+    fetch(`/api/runs/${id}/logs`).then(r => r.json()),
+    fetch(`/api/runs/${id}/chat`).then(r => r.json()),
+  ]);
+  const cost = await fetch(`/api/tasks/${run.task_id}/cost`).then(r => r.json()).catch(() => null);
+  const b = run.board || {};
+  const rows = [["TASK", run.task_id], ["STATUS", run.status], ["ROLE", run.worker],
+    ["MODEL", run.model], ["ATTEMPT", b.attempt ?? "—"], ["TESTS", b.test_status ?? "—"],
+    ["LATEST", b.latest_report || "—"], ["COST", cost ? `$${cost.cost.toFixed(4)} in=${cost.input_tokens} out=${cost.output_tokens}` : "—"],
+    ["GATE", (run.state && run.state.pending_approval) || "—"]];
+  $("detail").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd></dd>`).join("");
+  [...$("detail").querySelectorAll("dd")].forEach((dd, i) => dd.textContent = String(rows[i][1]));
+  const st = (run.state && run.state.status) || "running";
+  const gated = !!(run.state && run.state.pending_approval);
+  const held = ["paused", "blocked"].includes(st) || run.status === "blocked";
+  document.querySelectorAll("#keybank .key").forEach(k => {
+    const w = k.dataset.when;
+    k.disabled = (w === "gate" && !gated) || (w === "held" && !held) ||
+      (k.dataset.a === "pause" && held) || (["escalate"].includes(k.dataset.a) && ["escalated", "cancelled"].includes(st));
+    k.title = k.disabled
+      ? (w === "gate" ? "Needs a pending approval gate" : w === "held" ? "Needs a held run" : "Not available in this state")
+      : `${k.dataset.n} — press twice to confirm`;
+    if (k.disabled && armedBtn === k) disarm();
+  });
+  renderChat(chat.messages || []);
+  renderLogs(logs.logs || []);
+}
+function renderChat(msgs) {
+  const c = $("chat");
+  c.innerHTML = msgs.map(m => `<p class="${m.role === "user" ? "u me" : "o ship"}"><b>${m.role}:</b> <span></span></p>`).join("") || "<p><i>NO TRAFFIC — CHANNEL OPEN</i></p>";
+  [...c.querySelectorAll("p span")].forEach((s, i) => s.textContent = msgs[i] ? msgs[i].content : "");
+  c.scrollTop = c.scrollHeight;
+}
+function renderLogs(chunks) {
+  const box = $("logs");
+  if (!chunks.length) { box.innerHTML = "<p><i>NO TELEMETRY — AWAITING UPLINK</i></p>"; return; }
+  box.innerHTML = "";
+  chunks.forEach((text, i) => {
+    const div = document.createElement("div"); div.className = "logchunk";
+    const pre = document.createElement("pre"); pre.textContent = text;
+    div.appendChild(pre);
+    if (/omitted/i.test(text)) {
+      const b = document.createElement("button");
+      b.textContent = "[+OMITTED → RAW]";
+      b.onclick = () => toggleRaw(i, b, pre);
+      div.appendChild(b);
+    }
+    box.appendChild(div);
+  });
+}
+async function toggleRaw(i, btn, pre) {
+  if (rawCache[i] === undefined) {
+    const body = await fetch(`/api/runs/${runId}/logs?raw=true`).then(r => r.json());
+    (body.logs || []).forEach((t, j) => rawCache[j] = t);
+  }
+  const showingRaw = btn.dataset.raw === "1";
+  pre.textContent = showingRaw ? (await fetch(`/api/runs/${runId}/logs`).then(r => r.json())).logs[i] : rawCache[i];
+  btn.dataset.raw = showingRaw ? "" : "1";
+  btn.textContent = showingRaw ? "[+OMITTED → RAW]" : "[RAW → COMPRESSED]";
+}
+async function sendChat(text) {
+  const t = text.trim(); if (!t) return;
+  if (t.startsWith("/")) { // slash commands -> control plane
+    const [cmd, ...rest] = t.slice(1).split(" ");
+    const map = {approve: "approve", reject: "reject", retry: "retry", resume: "retry", hold: "pause", pause: "pause", escalate: "escalate"};
+    if (map[cmd]) { await command(map[cmd], rest.join(" ")); return; }
+  }
+  const thread = await fetch(`/api/runs/${runId}/chat`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({content: t})}).then(r => r.json());
+  renderChat(thread.messages || []);
+}
+function disarm() { if (armedBtn) { armedBtn.classList.remove("armed"); armedBtn.textContent = armedBtn.dataset.n; armedBtn = null; clearTimeout(armedTimer); } }
+async function command(action, argument = "") {
+  const btn = document.querySelector(`#keybank .key[data-a="${action}"]:not(:disabled)`);
+  await fetch(`/api/runs/${runId}/control`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({action, argument})});
+  disarm(); await refresh();
+}
+function stream() {
+  if (typeof EventSource === "undefined") { setInterval(refresh, 5000); return; }
   try {
     const es = new EventSource(`/api/runs/${runId}/events`);
-    es.addEventListener("snapshot", () => { runs(); chat(); });
+    es.addEventListener("snapshot", () => refresh());
     es.addEventListener("end", () => es.close());
-    es.onerror = () => { es.close(); setInterval(() => { runs(); chat(); }, 5000); };
-  } catch { setInterval(() => { runs(); chat(); }, 5000); }
-} else { setInterval(() => { runs(); chat(); }, 5000); }
+    es.onerror = () => { es.close(); setInterval(refresh, 5000); };
+  } catch { setInterval(refresh, 5000); }
+}
+function setScheme(mode) {
+  document.documentElement.dataset.scheme = mode;
+  try { localStorage.setItem("sw-scheme", mode); } catch {}
+  $("schemeBtn").textContent = `SCHEME: ${mode.toUpperCase()}`;
+}
+$("chatForm").onsubmit = async e => { e.preventDefault(); const el = $("chatIn"); await sendChat(el.value); el.value = ""; };
+document.querySelectorAll("#keybank .key").forEach(k => k.onclick = () => {
+  if (k.disabled) return;
+  if (armedBtn !== k) { disarm(); armedBtn = k; k.classList.add("armed"); k.textContent = "CONFIRM?"; armedTimer = setTimeout(disarm, 3000); return; }
+  command(k.dataset.a);
+});
+$("schemeBtn").onclick = () => setScheme(document.documentElement.dataset.scheme === "dark" ? "light" : "dark");
+try { const s = localStorage.getItem("sw-scheme"); if (s === "light" || s === "dark") setScheme(s); } catch {}
+try { const q = new URLSearchParams(location.search).get("scheme"); if (q === "light" || q === "dark") setScheme(q); } catch {}
+boot();
 </script>
 </html>
