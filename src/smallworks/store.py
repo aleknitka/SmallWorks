@@ -112,7 +112,11 @@ class Store:
             self._runs[run_id] = run
 
     def _seed_milestone_showcase(self) -> None:
-        """Static diamond so the panel has depth on first boot (mirrors _seed_showcase)."""
+        """Three static milestones so the picker has states to show (mirrors _seed_showcase).
+
+        AUTH-M1: open diamond, one task retrying. BILL-M2: breached (reviewer
+        escalated — parked for a human). OPS-M3: met yesterday, kept for history.
+        """
         self._milestones["AUTH-M1"] = MilestoneView(
             milestone_id="AUTH-M1",
             verdict="open",
@@ -131,6 +135,40 @@ class Store:
                          depends_on=["AUTH-017"]),
             ],
             round_outcomes=[{"AUTH-017": "pass", "AUTH-018": "escalate", "AUTH-019": "pass"}],
+        )
+        self._milestones["BILL-M2"] = MilestoneView(
+            milestone_id="BILL-M2",
+            predicate="all_tasks_pass",
+            verdict="breached",
+            rounds=2,
+            max_rounds=5,
+            nodes=[
+                TaskNode(task_id="BILL-004", wave=0, outcome="passed", action="pass",
+                         attempts=1, test_status="passed", latest_report="review PASS: looks good"),
+                TaskNode(task_id="BILL-005", wave=1, outcome="escalated",
+                         action="escalate", reason="reviewer escalated: scope drift",
+                         attempts=2, test_status="passed",
+                         latest_report="review ESCALATE: scope drift",
+                         depends_on=["BILL-004"]),
+            ],
+            round_outcomes=[
+                {"BILL-004": "pass", "BILL-005": "retry"},
+                {"BILL-004": "pass", "BILL-005": "escalate"},
+            ],
+        )
+        self._milestones["OPS-M3"] = MilestoneView(
+            milestone_id="OPS-M3",
+            predicate="all_tasks_pass",
+            verdict="met",
+            rounds=1,
+            max_rounds=5,
+            nodes=[
+                TaskNode(task_id="OPS-001", wave=0, outcome="passed", action="pass",
+                         attempts=1, test_status="passed", latest_report="review PASS: looks good"),
+                TaskNode(task_id="OPS-002", wave=0, outcome="passed", action="pass",
+                         attempts=1, test_status="passed", latest_report="review PASS: looks good"),
+            ],
+            round_outcomes=[{"OPS-001": "pass", "OPS-002": "pass"}],
         )
 
     def list_runs(self) -> list[Run]:

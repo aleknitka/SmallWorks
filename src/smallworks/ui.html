@@ -93,6 +93,13 @@
   form.cmd button:hover, .key:not(:disabled):hover { box-shadow: var(--glow); border-color: var(--ph); }
   .key:disabled { color: var(--ph-dim); border-color: var(--line); cursor: not-allowed; opacity: .55; }
   .note { color: var(--ph-dim); font-size: 11px; margin: 0 0 8px; }
+  #msList .mspick { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  #msList .mstab { font: inherit; font-size: 11px; color: var(--ph-dim); background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; cursor: pointer; }
+  #msList .mstab .verdict.met { color: var(--ph); }
+  #msList .mstab .verdict.open { color: var(--amber); }
+  #msList .mstab .verdict.breached { color: var(--red); }
+  #msList .mstab.sel { color: var(--ink); border-color: var(--ph); }
+  #msList .mstab:hover { box-shadow: var(--glow); }
   #msList .ms { border-bottom: 1px dotted var(--line); padding: 8px 0; }
   #msList .ms:last-child { border-bottom: none; }
   #msList .ms .verdict { letter-spacing: 2px; }
@@ -280,6 +287,7 @@ function stream() {
 const MS_COLOR = { passed: "var(--ph)", pass: "var(--ph)", retry: "var(--amber)", escalated: "var(--red)", pending: "var(--ph-dim)" };
 const MS_GLYPH = { passed: "\u2588", pass: "\u2588", retry: "\u25B2", escalated: "\u25C6", pending: "\u2591" };
 function msShort(id) { const m = id.match(/-(\d+)$/); return m ? m[1] : id; }
+let msId = null;
 async function loadMilestones() {
   const box = $("msList"); box.innerHTML = "";
   let data; try { data = await (await fetch("/api/milestones")).json(); } catch { box.textContent = "OFFLINE"; return; }
@@ -289,12 +297,28 @@ async function loadMilestones() {
     run.dataset.wired = "1";
     run.onclick = async () => {
       run.textContent = "RUNNING...";
-      await fetch("/api/milestones/demo/run", { method: "POST" });
+      const started = await fetch("/api/milestones/demo/run", { method: "POST" }).then(r => r.json()).catch(() => null);
+      if (started && started.milestone_id) msId = started.milestone_id;
       run.textContent = "RUN DEMO LOOP";
       msPoll();
     };
   }
-  for (const m of data.milestones) box.appendChild(milestoneCard(m));
+  // Picker: one graph at a time — rows carry verdict dots, selection shows the DAG.
+  const bar = document.createElement("div"); bar.className = "mspick";
+  if (!data.milestones.some(m => m.milestone_id === msId)) msId = data.milestones[0].milestone_id;
+  for (const m of data.milestones) {
+    const b = document.createElement("button"); b.type = "button";
+    b.className = "mstab" + (m.milestone_id === msId ? " sel" : "");
+    b.setAttribute("aria-pressed", String(m.milestone_id === msId));
+    const dot = document.createElement("span"); dot.className = "verdict " + m.verdict; dot.textContent = "◼";
+    b.append(dot, document.createTextNode(` ${m.milestone_id} R${m.rounds}/${m.max_rounds}`));
+    b.title = `${m.milestone_id} · ${m.verdict} · round ${m.rounds}/${m.max_rounds}`;
+    b.onclick = () => { msId = m.milestone_id; loadMilestones(); };
+    bar.appendChild(b);
+  }
+  box.appendChild(bar);
+  const cur = data.milestones.find(m => m.milestone_id === msId) || data.milestones[0];
+  box.appendChild(milestoneCard(cur));
 }
 function milestoneCard(m) {
   const div = document.createElement("div"); div.className = "ms";
