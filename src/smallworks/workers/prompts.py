@@ -14,24 +14,32 @@ JSON_ONLY = "Reply with exactly one JSON object, no prose, no fences."
 
 def architect_prompt(idea: str, overview: str) -> str:
     return (
-        "Turn this idea into a Blueprint: modules, boundaries, dependencies, "
-        "interfaces, constraints, acceptance criteria. "
+        f"GOAL: turn this idea into a buildable Blueprint: {idea}.\n"
+        f"CONTEXT (repo as it stands — respect boundaries, reuse modules):\n{overview or '(no overview — greenfield design)'}\n"
+        "RULES: 2-5 modules, each with ONE responsibility; name dependencies "
+        "explicitly; stdlib-only unless the idea demands otherwise. "
         f"{JSON_ONLY} Shape: "
         '{"project": "<name>", "modules": [{"name": "<m>", "responsibility": "...", '
         '"interface": "...", "acceptance_criteria": ["..."]}], "dependencies": [], '
         '"acceptance_criteria": ["..."]}. '
-        f"Idea: {idea}. Repo overview: {overview}"
+        "Module interfaces pin function/class names, signatures, and error "
+        "behaviour — the Engineer will treat them as binding."
     )
 
 
 def engineer_prompt(module: ModuleSpec) -> str:
+    acc = "\n".join(f"- {c}" for c in module.acceptance_criteria)
     return (
-        "Break this Blueprint module into bounded implementation tasks. "
+        f"GOAL: break module {module.name} into bounded implementation tasks one developer call can finish.\n"
+        f"CONTRACT (the Architect's binding interface — every task must serve it):\n{module.interface}\n"
+        f"RESPONSIBILITY: {module.responsibility}.\n"
+        f"ACCEPTANCE (each criterion needs at least one task that proves it):\n{acc}\n"
+        "RULES: task_ids PREFIX-N (PREFIX = module name uppercased, e.g. RETRY-1); "
+        "each task touches 1-2 files under src/smallworks/; allowed_files MUST be "
+        "concrete paths; acceptance_criteria MUST be executable checks. "
+        f"{JSON_ONLY} Shape: "
         '{"tasks": [{"task_id": "PREFIX-1", "module": "<name>", "behaviour": "...", '
-        '"allowed_files": ["src/..."], "acceptance_criteria": ["..."]}]}. '
-        f"Module: {module.name}: {module.responsibility}. "
-        f"Interface: {module.interface}. "
-        f"Acceptance: {'; '.join(module.acceptance_criteria)}"
+        '"allowed_files": ["src/..."], "acceptance_criteria": ["..."]}]}.'
     )
 
 
