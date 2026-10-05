@@ -84,23 +84,6 @@
   .fxrow .nm { flex: 1; min-width: 0; }
   .route:last-child { border-bottom: none; }
   .route .grp { color: var(--ph-dim); }
-  .ms { border-bottom: 1px dotted var(--line); padding: 8px 0; }
-  .ms:last-child { border-bottom: none; }
-  .ms .verdict { letter-spacing: 2px; }
-  .ms .verdict.met { color: var(--ph); }
-  .ms .verdict.open { color: var(--amber); }
-  .ms .verdict.breached { color: var(--red); }
-  .ms svg { display: block; width: 100%; height: auto; margin-top: 6px; }
-  .ms svg .node { cursor: pointer; }
-  .ms svg .node rect { fill: var(--bg); stroke-width: 1; }
-  .ms svg .node text { font: inherit; font-size: 11px; }
-  .ms svg .edge { stroke: var(--ph-dim); stroke-width: 1; fill: none; }
-  .ms svg .node.sel rect { stroke-width: 2; filter: drop-shadow(0 0 4px currentColor); }
-  .ms .rounds { color: var(--ph-dim); font-size: 11px; margin-top: 4px; }
-  .ms .detail { white-space: pre-wrap; font-size: 11px; margin-top: 6px; border-top: 1px dotted var(--line); padding-top: 6px; }
-  .ms .ctl { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-  .ms .ctl button { font: inherit; font-size: 11px; color: var(--ph); background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
-  .ms .ctl button:hover { box-shadow: var(--glow); border-color: var(--ph); }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition: none !important; animation: none !important; }
     body::before { display: none; }
@@ -117,11 +100,6 @@
     <div id="provList"></div>
   </section>
   <section aria-label="Routing"><h2>Routing</h2><div id="routeList"></div></section>
-  <section aria-label="Milestones"><h2>Milestones</h2>
-    <p class="note">Task graph runs itself until the predicate holds. Click a node for detail; controls queue for the next round.</p>
-    <div class="ctl" style="margin-bottom:8px"><button id="msRun" type="button">RUN DEMO LOOP</button></div>
-    <div id="msList"></div>
-  </section>
   <section aria-label="Tube effects"><h2>Tube effects</h2><div id="fxList"></div></section>
   <section aria-label="Display"><h2>Display</h2><div id="schemeList"></div></section>
 </main>
@@ -286,117 +264,6 @@ $("schemeBtn").onclick = () => setScheme(document.documentElement.dataset.scheme
 try { const s = localStorage.getItem("sw-scheme"); if (s === "light" || s === "dark") setScheme(s); } catch {}
 try { const q = new URLSearchParams(location.search).get("scheme"); if (q === "light" || q === "dark") setScheme(q); } catch {}
 for (const [k, , , fb] of FX) fxApply(k, fxGet(k, fb));
-const MS_COLOR = { passed: "var(--ph)", pass: "var(--ph)", retry: "var(--amber)", escalated: "var(--red)", pending: "var(--ph-dim)" };
-const MS_GLYPH = { passed: "\u2588", pass: "\u2588", retry: "\u25B2", escalated: "\u25C6", pending: "\u2591" };
-function msShort(id) { const m = id.match(/-(\d+)$/); return m ? m[1] : id; }
-async function loadMilestones() {
-  const box = $("msList"); box.innerHTML = "";
-  let data; try { data = await (await fetch("/api/milestones")).json(); } catch { box.textContent = "OFFLINE"; return; }
-  if (!data.milestones.length) { box.textContent = "NO MILESTONES"; return; }
-  const run = $("msRun");
-  if (run && !run.dataset.wired) {
-    run.dataset.wired = "1";
-    run.onclick = async () => {
-      run.textContent = "RUNNING...";
-      await fetch("/api/milestones/demo/run", { method: "POST" });
-      run.textContent = "RUN DEMO LOOP";
-      msPoll();
-    };
-  }
-  for (const m of data.milestones) box.appendChild(milestoneCard(m));
-}
-function milestoneCard(m) {
-  const div = document.createElement("div"); div.className = "ms";
-  const head = document.createElement("div");
-  const badge = document.createElement("span"); badge.className = "verdict " + m.verdict;
-  badge.textContent = `MILESTONE ${m.milestone_id} \u25AE ${m.verdict.toUpperCase()}`;
-  head.appendChild(badge); div.appendChild(head);
-  const NS = "http://www.w3.org/2000/svg";
-  const maxWave = Math.max(0, ...m.nodes.map(n => n.wave));
-  const cols = m.nodes.reduce((acc, n) => { (acc[n.wave] = acc[n.wave] || []).push(n); return acc; }, {});
-  const W = 150, H = 44, GX = 44, GY = 16;
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("viewBox", `0 0 ${(maxWave + 1) * (W + GX)} ${Math.max(...Object.values(cols).map(c => c.length)) * (H + GY) + 8}`);
-  svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", `Task graph for ${m.milestone_id}`);
-  const pos = {};
-  for (const [w, ns] of Object.entries(cols)) for (let i = 0; i < ns.length; i++)
-    pos[ns[i].task_id] = { x: (+w) * (W + GX) + 4, y: i * (H + GY) + 4 };
-  const defs = document.createElementNS(NS, "defs");
-  defs.innerHTML = `<marker id="ah" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7" fill="none" stroke="var(--ph-dim)" stroke-width="1"/></marker>`;
-  svg.appendChild(defs);
-  for (const n of m.nodes) for (const d of n.depends_on) {
-    if (!pos[d]) continue;
-    const a = pos[d], b = pos[n.task_id];
-    const x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2;
-    const mx = (x1 + x2) / 2;
-    const e = document.createElementNS(NS, "path");
-    e.setAttribute("d", `M ${x1} ${y1} H ${mx} V ${y2} H ${x2}`);
-    e.setAttribute("class", "edge"); e.setAttribute("marker-end", "url(#ah)");
-    if (n.outcome === "escalated") e.setAttribute("opacity", "0.4");
-    svg.appendChild(e);
-  }
-  const detail = document.createElement("div"); detail.className = "detail";
-  detail.textContent = "SELECT NODE FOR DETAIL";
-  for (const n of m.nodes) {
-    const g = document.createElementNS(NS, "g");
-    g.setAttribute("class", "node"); g.setAttribute("tabindex", "0");
-    g.setAttribute("role", "button"); g.setAttribute("aria-label", `${n.task_id} ${n.outcome}`);
-    const col = MS_COLOR[n.outcome] || "var(--ph-dim)";
-    const r = document.createElementNS(NS, "rect");
-    const p = pos[n.task_id];
-    r.setAttribute("x", p.x); r.setAttribute("y", p.y);
-    r.setAttribute("width", W); r.setAttribute("height", H);
-    r.setAttribute("stroke", col);
-    const t1 = document.createElementNS(NS, "text");
-    t1.setAttribute("x", p.x + 8); t1.setAttribute("y", p.y + 18);
-    t1.setAttribute("fill", col);
-    t1.textContent = `${MS_GLYPH[n.outcome] || "\u2591"} ${msShort(n.task_id)}`;
-    const t2 = document.createElementNS(NS, "text");
-    t2.setAttribute("x", p.x + 8); t2.setAttribute("y", p.y + 33);
-    t2.setAttribute("fill", "var(--ph-dim)");
-    t2.textContent = (n.action || "pending").toUpperCase() + (n.attempts ? ` A${n.attempts}` : "");
-    g.append(r, t1, t2); svg.appendChild(g);
-    const show = () => {
-      svg.querySelectorAll(".node").forEach(x => x.classList.remove("sel"));
-      g.classList.add("sel");
-      detail.textContent = [`[${n.task_id}] ${n.outcome.toUpperCase()} decide=${n.action || "--"} attempts=${n.attempts}`,
-        `deps: ${n.depends_on.join(", ") || "--"}`, n.latest_report || "no report yet",
-        n.reason ? `reason: ${n.reason}` : ""].filter(Boolean).join("\n");
-    };
-    g.addEventListener("click", show);
-    g.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); show(); } });
-  }
-  div.appendChild(svg);
-  detail.setAttribute("tabindex", "0"); div.appendChild(detail);
-  const strip = document.createElement("div"); strip.className = "rounds";
-  strip.textContent = `ROUNDS ${m.rounds}/${m.max_rounds} ` + m.round_outcomes.map((o, i) => {
-    const keys = Object.keys(o);
-    const ok = keys.filter(k => o[k] === "pass").length;
-    return `R${i + 1} ${"\u25CF".repeat(ok)}${"\u25CB".repeat(keys.length - ok)}`;
-  }).join("  ");
-  div.appendChild(strip);
-  const ctl = document.createElement("div"); ctl.className = "ctl";
-  for (const [act, label] of [["approve", "APPROVE"], ["reject", "REJECT"], ["send_back", "SEND BACK"], ["retry", "RETRY ALL"]]) {
-    const b = document.createElement("button"); b.type = "button"; b.textContent = label;
-    b.onclick = async () => {
-      b.textContent = "...";
-      const target = act === "retry" ? (m.nodes.find(n => n.outcome !== "passed") || {}).task_id || m.milestone_id : m.milestone_id;
-      const res = await fetch(`/api/milestones/${m.milestone_id}/control`, { method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ task_id: target, action: act }) });
-      b.textContent = res.ok ? "QUEUED" : "FAILED";
-      setTimeout(() => { b.textContent = label; }, 1500);
-    };
-    ctl.appendChild(b);
-  }
-  div.appendChild(ctl);
-  return div;
-}
-let msTimer = null;
-function msPoll() { loadMilestones(); }
-renderFx(); paintScheme(); loadProviders(); loadRouting(); loadMilestones();
-if (msTimer) clearInterval(msTimer);
-msTimer = setInterval(() => { const b = $("msList"); if (b && b.isConnected) loadMilestones(); }, 3000);
+renderFx(); paintScheme(); loadProviders(); loadRouting();
 </script>
 </html>
