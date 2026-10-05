@@ -72,11 +72,17 @@ class EngineeringPlan(BaseModel):
 
 
 class Patch(BaseModel):
-    """Developer output for one task (spec §11): changed files + summary."""
+    """Developer output for one task (spec §11): changed files + full contents + summary.
+
+    ``contents`` maps each changed path to its COMPLETE new file text. The
+    factory applies them (worktree or repo root) before the tester executes —
+    a patch that is never materialized can never pass verification.
+    """
 
     task_id: str = Field(pattern=r"^[A-Z]+-\d+$")
     files_changed: list[str] = Field(min_length=1)
     summary: str = Field(min_length=1)
+    contents: dict[str, str] = Field(default_factory=dict)
 
 
 class TestReport(BaseModel):
@@ -188,6 +194,7 @@ def validate_decision(
     """Deterministic gates override model decisions (spec §8).
 
     - failing tests ⇒ cannot pass
+    - zero executed tests ⇒ cannot pass (nothing measured; done is unverified)
     - non-PASS review ⇒ cannot pass
     - forbidden files touched ⇒ reject (retry)
     - security gate failing ⇒ escalate
@@ -207,6 +214,11 @@ def validate_decision(
             return Decision(
                 task_id=decision.task_id, action="retry", reason="tests failing", retryable=True
             )
+    if test_report is not None and test_report.tests_run == 0 and decision.action == "pass":
+        return Decision(
+            task_id=decision.task_id, action="retry",
+            reason="no tests executed", retryable=True,
+        )
     if review is not None and review.verdict != "PASS" and decision.action == "pass":
         return Decision(
             task_id=decision.task_id, action="retry", reason="review not PASS", retryable=True

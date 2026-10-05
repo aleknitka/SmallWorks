@@ -42,7 +42,9 @@ def developer_prompt(task: ImplementationTask, symbols: list[str] | None = None)
         f"Touch ONLY these files: {', '.join(task.allowed_files)}. "
         f"Acceptance: {'; '.join(task.acceptance_criteria)}. "
         f"Relevant symbols: {syms}. {JSON_ONLY} Shape: "
-        '{"files_changed": ["src/..."], "summary": "<one line>"}'
+        '{"files_changed": ["src/..."], "summary": "<one line>", '
+        '"contents": {"<path>": "<COMPLETE new file text>"}}. '
+        "contents MUST hold every changed file in full; an unwritten file fails verification."
     )
 
 

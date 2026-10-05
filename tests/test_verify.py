@@ -1,0 +1,142 @@
+"""Executed verification: measured pytest overrides model claims (grounded tests)."""
+
+import textwrap
+
+from smallworks.schemas import Decision, ImplementationTask, TestReport
+from smallworks.schemas import validate_decision
+from smallworks.verify import run_pytest, verify_task_tests
+from smallworks.verify import tests_for_task as resolve_tests
+from smallworks.workflow import Workflow, _apply_patch
+from smallworks.workers.roles import WorkerError
+
+
+def _task(**over) -> ImplementationTask:
+    base = {
+        "task_id": "AUTH-017",
+        "module": "auth",
+        "behaviour": "handle expired token",
+        "allowed_files": ["tests/test_auth_probe.py"],
+        "acceptance_criteria": ["expired token returns 401"],
+    }
+    base.update(over)
+    return ImplementationTask.model_validate(base)
+
+
+def _write(path, text):
+    path.write_text(textwrap.dedent(text), encoding="utf-8")
+
+
+def test_runner_measures_passing_suite(tmp_path):
+    _write(tmp_path / "test_auth_probe.py", """
+        def test_ok():
+            assert 1 + 1 == 2
+    """)
+    done = run_pytest([tmp_path / "test_auth_probe.py"], cwd=tmp_path)
+    assert done.passed and done.tests_run == 1 and done.tests_failed == 0
+
+
+def test_runner_measures_failing_suite(tmp_path):
+    _write(tmp_path / "test_auth_probe.py", """
+        def test_broken():
+            assert 1 + 1 == 3
+    """)
+    done = run_pytest([tmp_path / "test_auth_probe.py"], cwd=tmp_path)
+    assert not done.passed and done.tests_failed == 1
+
+
+def test_resolves_conventional_module_file(tmp_path):
+    (tmp_path / "tests").mkdir()
+    _write(tmp_path / "tests" / "test_auth.py", "def test_x():\n    assert True\n")
+    found = resolve_tests(_task(allowed_files=["src/auth/token.py"]), tmp_path)
+    assert [p.name for p in found] == ["test_auth.py"]
+
+
+def test_missing_tests_verify_none(tmp_path):
+    assert verify_task_tests(_task(), tmp_path) is None
+
+
+def test_zero_run_report_cannot_pass():
+    # passed=True with zero runs is the hollow claim: nothing measured.
+    report = TestReport(task_id="AUTH-017", passed=True, tests_run=0, tests_failed=0)
+    d = validate_decision(Decision(task_id="AUTH-017", action="pass"), test_report=report, review=None)
+    assert d.action == "retry" and "no tests executed" in d.reason
+
+
+def test_claimed_pass_without_files_fails_execution(tmp_path):
+    """The LIVE-M1 lesson: model says passed, nothing on disk → measured fail."""
+    from smallworks.workers.roles import _verify_report
+
+    claimed = TestReport(task_id="AUTH-017", passed=True, tests_run=3, tests_failed=0)
+    measured = _verify_report(_task(), claimed, tmp_path)
+    assert not measured.passed and measured.tests_run == 0
+
+
+def test_measured_pass_overrides_model_downgrade(tmp_path):
+    """Override runs both directions: model pessimism cannot fail green files."""
+    from smallworks.workers.roles import _verify_report
+
+    (tmp_path / "tests").mkdir(exist_ok=True)
+    _write(tmp_path / "tests" / "test_auth_probe.py", "def test_x():\n    assert True\n")
+    claimed = TestReport(task_id="AUTH-017", passed=False, tests_run=1, tests_failed=1)
+    task = _task()
+    measured = _verify_report(task, claimed, tmp_path)
+    assert measured.passed and measured.tests_run == 1
+
+
+def test_apply_rejects_unwritten_files_under_verify(tmp_path):
+    from smallworks.schemas import Patch
+
+    patch = Patch(task_id="AUTH-017", files_changed=["src/auth/token.py"], summary="fix")
+    try:
+        _apply_patch(_task(), patch, tmp_path, verify=True)
+    except WorkerError as exc:
+        assert "unwritten" in str(exc)
+    else:
+        raise AssertionError("expected WorkerError")
+    # Scripted runs keep names-only patches.
+    _apply_patch(_task(), patch, tmp_path, verify=False)
+
+
+def test_apply_materializes_contents(tmp_path):
+    from smallworks.schemas import Patch
+
+    patch = Patch(
+        task_id="AUTH-017", files_changed=["pkg/mod.py"], summary="add",
+        contents={"pkg/mod.py": "X = 1\n"},
+    )
+    _apply_patch(_task(), patch, tmp_path, verify=True)
+    assert (tmp_path / "pkg" / "mod.py").read_text(encoding="utf-8") == "X = 1\n"
+
+
+def test_workflow_rejects_claimed_pass_without_execution(tmp_path):
+    """End-to-end: passing model text + real verify root with no test files → no pass."""
+    import json
+    import importlib.util
+    from pathlib import Path
+
+    import smallworks.workflow as workflow_mod
+
+    spec = importlib.util.spec_from_file_location(
+        "tw", Path("tests/test_workflow.py"))
+    tw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tw)
+    KeyedTransport, RoleGateway = tw.KeyedTransport, tw.RoleGateway
+    _models, _policy, _workers = tw._models, tw._policy, tw._workers
+
+    texts = {
+        "engineer": json.dumps({"tasks": []}),
+        "developer": json.dumps(
+            {"files_changed": ["tests/test_auth_probe.py"], "summary": "fix",
+             "contents": {"tests/test_auth_probe.py": "x = 1\n"}}
+        ),
+        "tester": json.dumps({"passed": True, "tests_run": 3, "tests_failed": 0}),
+        "reviewer": json.dumps({"verdict": "PASS", "notes": "fine"}),
+        "writer": "docs.",
+    }
+    gw = RoleGateway(_models(), _workers(), _policy(), transport=KeyedTransport(texts))
+    # No tests/test_auth.py under tmp root → verify measures nothing → retry, never pass.
+    (tmp_path / "tests").mkdir()
+    result = workflow_mod.Workflow(gw, max_retries=0, worktree_root=str(tmp_path),
+                                   verify=True).run_task(_task())
+    assert result.decision.action != "pass"
+    assert result.test_report is not None and result.test_report.tests_run == 0

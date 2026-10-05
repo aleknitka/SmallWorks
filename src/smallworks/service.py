@@ -212,6 +212,7 @@ def _run_demo_milestone(milestone_id: str) -> None:
         tasks, ms, gw, max_retries=0, max_workers=2,
         on_round=on_round, fresh_controls=lambda: pop_milestone_controls(milestone_id),
     )
+
     _milestone_threads.pop(milestone_id, None)
 
 
@@ -328,6 +329,7 @@ def _run_live_milestone(milestone_id: str) -> None:
         run_until_milestone(
             tasks, ms, gw, max_retries=1, max_workers=1,
             on_round=on_round, fresh_controls=lambda: pop_milestone_controls(milestone_id),
+            verify=True,  # grounded: measured pytest overrides model claims
         )
     except Exception:
         log.opt(exception=True).error("live thread failed")

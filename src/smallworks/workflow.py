@@ -68,6 +68,32 @@ class TaskResult:
     states: list[str] = field(default_factory=list)
 
 
+def _apply_patch(task: ImplementationTask, patch: Patch, workdir: object, *, verify: bool = False) -> None:
+    """Materialize ``patch.contents`` under ``workdir``.
+
+    Under ``verify`` every entry of ``files_changed`` needs full text in
+    ``contents`` — a patch that names files without writing them is
+    unverifiable and rejected. Scripted runs (``verify=False``) skip
+    enforcement: their transports return names only, no repo files asserted.
+    """
+    from pathlib import Path
+
+    from smallworks.workers.roles import WorkerError
+
+    log = logger.bind(component="workflow", task_id=task.task_id)
+    root = Path(str(workdir))
+    if verify:
+        missing = [f for f in patch.files_changed if f not in patch.contents]
+        if missing:
+            log.warning("patch names unwritten files: {}", missing)
+            raise WorkerError(f"developer left files unwritten: {missing}")
+    for name, text in patch.contents.items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    log.debug("patch applied files={}", patch.files_changed)
+
+
 @dataclass
 class Workflow:
     """Owns one task's gated loop; inject gateway + worktree root for tests."""
@@ -75,6 +101,7 @@ class Workflow:
     gateway: Gateway
     max_retries: int = 2
     worktree_root: str | None = None
+    verify: bool = False
 
     def run_task(self, task: ImplementationTask, *, symbols: list[str] | None = None) -> TaskResult:
         log = logger.bind(component="workflow", task_id=task.task_id)
@@ -89,13 +116,15 @@ class Workflow:
             try:
                 states.append(TaskState.DEVELOP)
                 try:
-                    with worktree_for(task.task_id, root=self.worktree_root):
+                    with worktree_for(task.task_id, root=self.worktree_root) as workdir:
                         last_patch = developer_task(task, self.gateway, symbols=symbols)
+                        _apply_patch(task, last_patch, workdir, verify=self.verify)
+                        states.append(TaskState.TEST)
+                        last_report = tester_task(task, last_patch, self.gateway,
+                                                  verify=self.verify, root=workdir)
                 except WorktreeError as exc:
                     log.error("worktree setup failed: {}", exc)
                     raise WorkerError(f"worktree failed: {exc}") from exc
-                states.append(TaskState.TEST)
-                last_report = tester_task(task, last_patch, self.gateway)
                 states.append(TaskState.REVIEW)
                 last_review = reviewer_task(task, last_patch, last_report, self.gateway)
             except (WorkerError, GatewayExhausted, BudgetExceeded) as exc:
@@ -175,6 +204,7 @@ def run_workflow(
     max_workers: int = 4,
     worktree_root: str | None = None,
     passed: set[str] | None = None,
+    verify: bool = False,
 ) -> list[TaskResult]:
     """Run tasks in dependency waves; each wave fans out, each keeps its gated sequence.
 
@@ -217,13 +247,15 @@ def run_workflow(
                 )
                 log.debug("task {} blocked by {}", t.task_id, unmet)
         if len(runnable) == 1:
-            outcomes[runnable[0].task_id] = Workflow(gateway, max_retries, worktree_root).run_task(
-                runnable[0]
-            )
+            outcomes[runnable[0].task_id] = Workflow(
+                gateway, max_retries, worktree_root, verify
+            ).run_task(runnable[0])
         elif runnable:
             with ThreadPoolExecutor(max_workers=min(max_workers, len(runnable))) as pool:
                 futures = {
-                    pool.submit(Workflow(gateway, max_retries, worktree_root).run_task, t): t
+                    pool.submit(
+                        Workflow(gateway, max_retries, worktree_root, verify).run_task, t
+                    ): t
                     for t in runnable
                 }
                 for f, t in futures.items():
@@ -307,6 +339,7 @@ def run_until_milestone(
     controls: list | None = None,
     on_round=None,
     fresh_controls=None,
+    verify: bool = False,
 ) -> MilestoneResult:
     """Run the task graph until the milestone predicate holds, or park it.
 
@@ -364,7 +397,7 @@ def run_until_milestone(
         closed = {tid for tid, r in latest.items() if r.decision.action == "pass"}
         round_results = run_workflow(
             tasks, gateway, max_retries=max_retries, max_workers=max_workers,
-            worktree_root=worktree_root, passed=closed,
+            worktree_root=worktree_root, passed=closed, verify=verify,
         )
         history.append(round_results)
         for r in round_results:

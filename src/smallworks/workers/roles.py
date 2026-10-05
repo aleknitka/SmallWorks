@@ -128,7 +128,18 @@ def developer_task(
     return patch
 
 
-def tester_task(task: ImplementationTask, patch: Patch, gateway: Gateway) -> TestReport:
+def tester_task(
+    task: ImplementationTask, patch: Patch, gateway: Gateway, *, verify: bool = False,
+    root: object = None,
+) -> TestReport:
+    """Tester: model drafts the report, execution overrides it (spec §8).
+
+    With ``verify=True`` (live runs, eval arm) the task's test files actually
+    execute: the measured result overrides the model's numbers in BOTH
+    directions, and zero runnable tests forces failure — an LLM cannot claim
+    done when nothing ran. Unit tests keep ``verify=False`` (scripted models,
+    no repo files asserted).
+    """
     log = logger.bind(component="workers", role="tester", task_id=task.task_id)
     data = _parse_json(
         _ask(gateway, "tester", prompts.tester_prompt(task, patch), task_id=task.task_id)[0],
@@ -140,8 +151,35 @@ def tester_task(task: ImplementationTask, patch: Patch, gateway: Gateway) -> Tes
     except ValidationError as exc:
         log.error("tester report invalid: {}", exc)
         raise WorkerError(f"tester report invalid: {exc}") from exc
+    if verify:
+        report = _verify_report(task, report, root)
     log.debug("tests passed={} failed={}", report.passed, report.tests_failed)
     return report
+
+
+def _verify_report(task: ImplementationTask, report: TestReport, root: object = None) -> TestReport:
+    """Replace model-claimed numbers with measured pytest results (or fail).
+
+    ``root`` is the worktree holding the applied patch; without it (unit-test
+    temps with no repo) the claim is unverifiable and fails closed.
+    """
+    from pathlib import Path
+
+    from smallworks.verify import verify_task_tests
+
+    log = logger.bind(component="workers", role="tester", task_id=task.task_id)
+    exec_root = Path(str(root)) if root is not None else None
+    if exec_root is None or not exec_root.is_dir():
+        log.warning("no execution root; treating claimed report as unverifiable")
+        return TestReport(task_id=task.task_id, passed=False, tests_run=0, tests_failed=0)
+    measured = verify_task_tests(task, exec_root)
+    if measured is None:
+        return TestReport(task_id=task.task_id, passed=False, tests_run=0, tests_failed=0)
+    if measured.passed != report.passed:
+        log.warning("model claimed passed={} but execution says {}; overriding",
+                    report.passed, measured.passed)
+    return TestReport(task_id=task.task_id, passed=measured.passed,
+                      tests_run=measured.tests_run, tests_failed=measured.tests_failed)
 
 
 def reviewer_task(task: ImplementationTask, patch: Patch, report: TestReport, gateway: Gateway) -> ReviewReport:
