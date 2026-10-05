@@ -14,3 +14,4 @@ wheels/
 
 # Runtime logs (loguru file sink)
 logs/
+serve-*.log
