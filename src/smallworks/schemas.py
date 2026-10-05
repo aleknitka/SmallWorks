@@ -101,6 +101,60 @@ class Decision(BaseModel):
     task_id: str
     action: Literal["pass", "retry", "escalate"]
     reason: str = ""
+    retryable: bool = False
+    """May an outer milestone loop re-drive this task in a new round?
+
+    Retry-budget exhaustion and blocked dependencies are retryable (fresh
+    context may succeed); reviewer escalations, security failures, and budget
+    breaches need a human and park the milestone.
+    """
+
+
+class Milestone(BaseModel):
+    """Run-level convergence target: which tasks close it and how (research §4.1).
+
+    ``predicate`` names the deterministic rule ``validate_milestone`` applies
+    over the task decisions collected so far. ``verdict`` is the last
+    evaluation — ``open`` keeps the outer loop running, ``met`` ends it,
+    ``breached`` parks it for a human (budget spent or escalated task).
+    """
+
+    milestone_id: str = Field(pattern=r"^[A-Z]+-M\d+$")
+    engineering_plan: str = Field(min_length=1)
+    predicate: Literal["all_tasks_pass", "no_open_escalations"] = "all_tasks_pass"
+    tasks: list[str] = Field(min_length=1)
+    max_rounds: int = Field(default=5, ge=1)
+    verdict: Literal["open", "met", "breached"] = "open"
+
+
+def validate_milestone(milestone: Milestone, decisions: dict[str, Decision]) -> Milestone:
+    """Deterministic run-level gate over per-task decisions (research §4.1/§4.2).
+
+    - every in-scope task decided ``pass`` ⇒ ``met``
+    - any ``escalate`` ⇒ ``breached`` (a human decides; the loop parks)
+    - missing decisions or any ``retry`` ⇒ ``open``
+    - ``no_open_escalations`` also counts decided-but-unpassed tasks as breached
+      once nothing is still retryable — i.e. pass, or park.
+    """
+    updated = milestone.model_copy(deep=True)
+    present = {tid: decisions[tid] for tid in milestone.tasks if tid in decisions}
+    if len(present) < len(milestone.tasks):
+        updated.verdict = "open"
+        return updated
+    if any(d.action == "escalate" and not d.retryable for d in present.values()):
+        updated.verdict = "breached"
+        return updated
+    if all(d.action == "pass" for d in present.values()):
+        updated.verdict = "met"
+        return updated
+    if milestone.predicate == "no_open_escalations" and not any(
+        d.action != "pass" and d.retryable for d in present.values()
+    ):
+        # Nothing left that another round could fix — park instead of lingering.
+        updated.verdict = "breached"
+        return updated
+    updated.verdict = "open"
+    return updated
 
 
 class RunReport(BaseModel):
@@ -139,12 +193,22 @@ def validate_decision(
     - security gate failing ⇒ escalate
     """
     if not security_gate_passed:
-        return Decision(task_id=decision.task_id, action="escalate", reason="security gate failed")
+        return Decision(
+            task_id=decision.task_id, action="escalate",
+            reason="security gate failed", retryable=False,
+        )
     if forbidden_files_touched:
-        return Decision(task_id=decision.task_id, action="retry", reason="forbidden files modified")
+        return Decision(
+            task_id=decision.task_id, action="retry",
+            reason="forbidden files modified", retryable=True,
+        )
     if test_report is not None and (not test_report.passed or test_report.tests_failed > 0):
         if decision.action == "pass":
-            return Decision(task_id=decision.task_id, action="retry", reason="tests failing")
+            return Decision(
+                task_id=decision.task_id, action="retry", reason="tests failing", retryable=True
+            )
     if review is not None and review.verdict != "PASS" and decision.action == "pass":
-        return Decision(task_id=decision.task_id, action="retry", reason="review not PASS")
+        return Decision(
+            task_id=decision.task_id, action="retry", reason="review not PASS", retryable=True
+        )
     return decision

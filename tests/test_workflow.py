@@ -8,7 +8,9 @@ import pytest
 from smallworks.config import Deployment, FactoryPolicy, WorkerConfig
 from smallworks.gateway import Gateway, TransportError, TransportResult
 from smallworks.schemas import ImplementationTask
-from smallworks.workflow import TaskOutcome, Workflow, run_workflow
+from smallworks.workflow import TaskOutcome, Workflow, run_until_milestone, run_workflow
+from smallworks.schemas import Milestone
+from smallworks.supervision import TaskControl
 from smallworks.workers.roles import WorkerError
 
 
@@ -167,6 +169,92 @@ def test_dependency_cycle_fails_fast(tmp_path):
     tasks = [_dep_task("AUTH-017", "AUTH-018"), _dep_task("AUTH-018", "AUTH-017")]
     with __import__("pytest").raises(ValueError, match="cycle"):
         run_workflow(tasks, gw, worktree_root=str(tmp_path))
+
+
+class FlapTransport(KeyedTransport):
+    """Fails tester once per task in ``fail_once_tasks``, then passes.
+
+    Inner ``run_task`` retries absorb transient failures, so cross-round
+    convergence needs a failure the inner loop cannot outlast: with
+    ``max_retries=0`` the task gets one attempt per round — fail round 1,
+    pass round 2.
+    """
+
+    def __init__(self, texts, fail_once_tasks: set[str] | None = None) -> None:
+        super().__init__(texts)
+        self.fail_once_tasks = set(fail_once_tasks or ())
+        self.failed: set[str] = set()
+        self.developer_calls = 0
+
+    def complete(self, deployment, prompt, *, task_id):
+        if prompt.startswith("tester::") and task_id in self.fail_once_tasks and task_id not in self.failed:
+            self.failed.add(task_id)
+            bad = json.loads(self.texts["tester"])
+            bad["passed"] = False
+            bad["tests_failed"] = 1
+            return TransportResult(text=json.dumps(bad), input_tokens=1, output_tokens=1)
+        if prompt.startswith("developer::"):
+            self.developer_calls += 1
+        return super().complete(deployment, prompt, task_id=task_id)
+
+
+def _milestone(task_ids=("AUTH-017",), **over) -> Milestone:
+    base: dict = {
+        "milestone_id": "AUTH-M1",
+        "engineering_plan": "plan-auth",
+        "predicate": "all_tasks_pass",
+        "tasks": list(task_ids),
+    }
+    base.update(over)
+    return Milestone.model_validate(base)
+
+
+def test_milestone_met_first_round(tmp_path):
+    gw = _gateway(_texts())
+    done = run_until_milestone([_task()], _milestone(), gw, worktree_root=str(tmp_path))
+    assert done.milestone.verdict == "met"
+    assert done.rounds == 1
+
+
+def test_milestone_converges_after_retry_without_rerunning_passed(tmp_path):
+    # AUTH-018 passes round 1; AUTH-017 fails once (single attempt per round),
+    # then passes round 2 alone — AUTH-018 is skipped, not re-run.
+    transport = FlapTransport(_texts(), fail_once_tasks={"AUTH-017"})
+    gw = RoleGateway(_models(), _workers(), _policy(), transport=transport)
+    tasks = [_task("AUTH-017"), _task("AUTH-018")]
+    done = run_until_milestone(tasks, _milestone(tasks=("AUTH-017", "AUTH-018")), gw,
+                               max_retries=0, worktree_root=str(tmp_path))
+    assert done.milestone.verdict == "met"
+    assert done.rounds == 2
+    assert transport.developer_calls == 3
+    assert [r.task_id for r in done.history[1]] == ["AUTH-017"]
+
+
+def test_milestone_breached_when_rounds_spent(tmp_path):
+    gw = _gateway(_texts(pass_tests=False))
+    done = run_until_milestone([_task()], _milestone(max_rounds=2), gw,
+                               worktree_root=str(tmp_path))
+    assert done.milestone.verdict == "breached"
+    assert done.rounds == 2
+    assert len(done.history) == 2
+
+
+def test_milestone_breached_on_escalation_parks_for_human(tmp_path):
+    gw = _gateway(_texts(verdict="ESCALATE"))
+    done = run_until_milestone([_task()], _milestone(), gw, worktree_root=str(tmp_path))
+    assert done.milestone.verdict == "breached"
+    assert done.rounds == 1
+
+
+def test_retry_control_reenters_escalated_task(tmp_path):
+    gw = _gateway(_texts())
+    escalated = run_until_milestone([_task()], _milestone(), _gateway(_texts(verdict="ESCALATE")),
+                                    worktree_root=str(tmp_path))
+    assert escalated.milestone.verdict == "breached"
+    control = TaskControl(task_id="AUTH-017", action="retry")
+    done = run_until_milestone([_task()], _milestone(), gw, worktree_root=str(tmp_path),
+                               controls=[control])
+    assert done.milestone.verdict == "met"
 
 
 def test_developer_out_of_scope_rejected(tmp_path):

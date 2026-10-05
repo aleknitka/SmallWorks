@@ -22,10 +22,12 @@ from smallworks.logging import logger
 from smallworks.schemas import (
     Decision,
     ImplementationTask,
+    Milestone,
     Patch,
     ReviewReport,
     TestReport,
     validate_decision,
+    validate_milestone,
 )
 from smallworks.workers.roles import (
     WorkerError,
@@ -106,7 +108,8 @@ class Workflow:
                                       [s.value for s in states])
                 if attempts > self.max_retries:
                     decision = Decision(task_id=task.task_id, action="escalate",
-                                        reason=f"retry budget spent ({attempts}): {exc}")
+                                        reason=f"retry budget spent ({attempts}): {exc}",
+                                        retryable=True)
                     return TaskResult(task.task_id, TaskOutcome.ESCALATED, attempts,
                                       decision, last_patch, last_report, last_review,
                                       [s.value for s in states])
@@ -136,7 +139,8 @@ class Workflow:
             # retry: loop back to develop unless the budget is spent
             if attempts > self.max_retries:
                 decision = Decision(task_id=task.task_id, action="escalate",
-                                    reason=f"retry budget spent after {attempts} attempts")
+                                    reason=f"retry budget spent after {attempts} attempts",
+                                    retryable=True)
                 return TaskResult(task.task_id, TaskOutcome.ESCALATED, attempts,
                                   decision, last_patch, last_report, last_review,
                                   [s.value for s in states])
@@ -170,27 +174,32 @@ def run_workflow(
     max_retries: int = 2,
     max_workers: int = 4,
     worktree_root: str | None = None,
+    passed: set[str] | None = None,
 ) -> list[TaskResult]:
     """Run tasks in dependency waves; each wave fans out, each keeps its gated sequence.
 
     A task whose dependency did not pass is escalated without running, naming
-    the unmet dependency.
+    the unmet dependency. ``passed`` names task ids already closed by an outer
+    loop (milestones): their dependencies count as satisfied and they are not
+    re-run — only unfinished tasks consume model calls.
     """
     log = logger.bind(component="workflow", tasks=[t.task_id for t in tasks])
     log.debug("fan-out {} tasks workers={}", len(tasks), max_workers)
-    by_id = {t.task_id: t for t in tasks}
+    already: set[str] = set(passed or ())
     outcomes: dict[str, TaskResult] = {}
     for wave in _waves(tasks):
         runnable = [
             t
             for t in wave
-            if all(
-                outcomes[d].outcome == TaskOutcome.PASSED for d in t.depends_on
+            if t.task_id not in already
+            and all(
+                d in already or (d in outcomes and outcomes[d].outcome == TaskOutcome.PASSED)
+                for d in t.depends_on
             )
         ]
         for t in wave:
-            if t not in runnable:
-                unmet = [d for d in t.depends_on if outcomes[d].outcome != TaskOutcome.PASSED]
+            if t.task_id not in already and t not in runnable:
+                unmet = [d for d in t.depends_on if not (d in already or (d in outcomes and outcomes[d].outcome == TaskOutcome.PASSED))]
                 outcomes[t.task_id] = TaskResult(
                     t.task_id,
                     TaskOutcome.ESCALATED,
@@ -199,6 +208,7 @@ def run_workflow(
                         task_id=t.task_id,
                         action="escalate",
                         reason=f"blocked: dependencies did not pass: {unmet}",
+                        retryable=True,
                     ),
                     None,
                     None,
@@ -218,8 +228,81 @@ def run_workflow(
                 }
                 for f, t in futures.items():
                     outcomes[t.task_id] = f.result()
-    _ = by_id
-    return [outcomes[t.task_id] for t in tasks]
+    results = []
+    for t in tasks:
+        if t.task_id in already and t.task_id not in outcomes:
+            continue  # closed by outer loop; not part of this round's results
+        results.append(outcomes[t.task_id])
+    return results
 
 
-__all__ = ["TaskOutcome", "TaskResult", "TaskState", "Workflow", "run_workflow"]
+@dataclass
+class MilestoneResult:
+    """Outcome of the convergence loop: final verdict + per-round history."""
+
+    milestone: Milestone
+    rounds: int
+    history: list[list[TaskResult]] = field(default_factory=list)
+
+
+def run_until_milestone(
+    tasks: list[ImplementationTask],
+    milestone: Milestone,
+    gateway: Gateway,
+    *,
+    max_retries: int = 2,
+    max_workers: int = 4,
+    worktree_root: str | None = None,
+    controls: list | None = None,
+) -> MilestoneResult:
+    """Run the task graph until the milestone predicate holds, or park it.
+
+    Each round runs unfinished tasks through ``run_workflow`` (fresh
+    ContextPackets per §6 — no parent-conversation inheritance), then evaluates
+    ``validate_milestone`` over the latest decisions. ``met`` ends the loop;
+    ``breached`` or ``max_rounds`` spent parks for a human. A ``retry`` control
+    re-enters an escalated task; ``cancel`` stops the loop immediately.
+    """
+    from smallworks.supervision import TaskControl
+
+    log = logger.bind(component="workflow", milestone_id=milestone.milestone_id)
+    pending_controls: list = list(controls or [])
+    current = milestone.model_copy(deep=True)
+    latest: dict[str, TaskResult] = {}
+    history: list[list[TaskResult]] = []
+    round_no = 0
+    while True:
+        for control in [c for c in pending_controls if isinstance(c, TaskControl)]:
+            if control.action == "cancel":
+                current.verdict = "breached"
+                return MilestoneResult(current, round_no, history)
+            if control.action == "retry" and control.task_id in latest:
+                del latest[control.task_id]
+        pending_controls = [c for c in pending_controls if not isinstance(c, TaskControl)]
+        if round_no >= current.max_rounds:
+            current.verdict = "breached"
+            log.debug("milestone breached: max_rounds spent ({})", current.max_rounds)
+            return MilestoneResult(current, round_no, history)
+        round_no += 1
+        unfinished = [t for t in tasks if t.task_id not in latest or latest[t.task_id].decision.action != "pass"]
+        if not unfinished:
+            current = validate_milestone(current, {tid: r.decision for tid, r in latest.items()})
+            return MilestoneResult(current, round_no - 1, history)
+        log.debug("milestone round {}/{} tasks={}", round_no, current.max_rounds, [t.task_id for t in unfinished])
+        # Full graph each round so wave logic unlocks dependents of newly-passing
+        # tasks; already-passed tasks are skipped, not re-run (no wasted calls).
+        closed = {tid for tid, r in latest.items() if r.decision.action == "pass"}
+        round_results = run_workflow(
+            tasks, gateway, max_retries=max_retries, max_workers=max_workers,
+            worktree_root=worktree_root, passed=closed,
+        )
+        history.append(round_results)
+        for r in round_results:
+            latest[r.task_id] = r
+        current = validate_milestone(current, {tid: r.decision for tid, r in latest.items()})
+        log.debug("milestone round {} verdict={}", round_no, current.verdict)
+        if current.verdict in ("met", "breached"):
+            return MilestoneResult(current, round_no, history)
+
+
+__all__ = ["MilestoneResult", "TaskOutcome", "TaskResult", "TaskState", "Workflow", "run_until_milestone", "run_workflow"]

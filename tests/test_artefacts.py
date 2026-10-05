@@ -5,11 +5,14 @@ from pydantic import ValidationError
 
 from smallworks.schemas import (
     Blueprint,
+    Decision,
     EngineeringPlan,
     ImplementationTask,
+    Milestone,
     ModuleSpec,
     Patch,
     ProjectSpec,
+    validate_milestone,
 )
 
 
@@ -61,3 +64,52 @@ def test_patch_roundtrip_and_rejects_empty_files():
 def test_patch_rejects_bad_task_id():
     with pytest.raises(ValidationError):
         Patch(task_id="nope", files_changed=["f.py"], summary="bad id")
+
+
+def _milestone(**over) -> Milestone:
+    base: dict = {
+        "milestone_id": "AUTH-M1",
+        "engineering_plan": "plan-auth",
+        "predicate": "all_tasks_pass",
+        "tasks": ["AUTH-017", "AUTH-018"],
+    }
+    base.update(over)
+    return Milestone.model_validate(base)
+
+
+def _decisions(*actions: str, retryable: bool = False) -> dict[str, Decision]:
+    tids = ["AUTH-017", "AUTH-018"]
+    return {t: Decision(task_id=t, action=a, retryable=retryable) for t, a in zip(tids, actions)}
+
+
+def test_milestone_met_when_all_pass():
+    assert validate_milestone(_milestone(), _decisions("pass", "pass")).verdict == "met"
+
+
+def test_milestone_open_on_retry_or_missing():
+    assert validate_milestone(_milestone(), _decisions("pass", "retry")).verdict == "open"
+    assert validate_milestone(_milestone(), _decisions("pass")).verdict == "open"
+
+
+def test_milestone_breached_on_escalate():
+    m = validate_milestone(_milestone(), _decisions("pass", "escalate"))
+    assert m.verdict == "breached"
+
+
+def test_milestone_open_on_retryable_escalate():
+    # Retry budget spent: another round with fresh context may succeed.
+    m = validate_milestone(_milestone(), _decisions("pass", "escalate", retryable=True))
+    assert m.verdict == "open"
+
+
+def test_milestone_strict_predicate_breaches_instead_of_lingering():
+    m = _milestone(predicate="no_open_escalations")
+    assert validate_milestone(m, _decisions("pass", "pass")).verdict == "met"
+    assert validate_milestone(m, _decisions("pass", "retry")).verdict == "breached"
+    # Retryable failures keep the lenient predicate open — a round may fix them.
+    assert validate_milestone(_milestone(), _decisions("pass", "retry")).verdict == "open"
+
+
+def test_milestone_rejects_bad_id():
+    with pytest.raises(ValidationError):
+        _milestone(milestone_id="nope")
