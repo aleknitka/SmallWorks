@@ -355,3 +355,32 @@ def test_developer_out_of_scope_rejected(tmp_path):
         from smallworks.workers.roles import developer_task
 
         developer_task(_task(), gw)
+
+def test_phase2_context_passthrough_when_flags_off():
+    from smallworks.workflow import _phase2_context
+
+    task = _task()
+    existing = {"a.py": "x" * 5000, "b.py": "y" * 5000}
+    shaped, syms = _phase2_context(task, existing, ["s1"], None, 100)
+    assert shaped == existing and syms == ["s1"]
+
+
+def test_phase2_retrieval_adds_symbols_and_budget_trims():
+    from types import SimpleNamespace
+
+    from smallworks.workflow import _phase2_context
+
+    task = ImplementationTask(
+        task_id="RETRY-001", module="retrier", behaviour="retry backoff sleep",
+        allowed_files=["src/smallworks/retry_options.py"],
+        acceptance_criteria=["sleep defaults"],
+    )
+    existing = {
+        "src/smallworks/retry_options.py": "RetryOptions dataclass sleep backoff " * 100,
+        "src/smallworks/other.py": "unrelated widget paint " * 100,
+    }
+    flags = SimpleNamespace(semantic_retrieval=True, context_optimisation=True)
+    shaped, syms = _phase2_context(task, existing, None, flags, 1_000)
+    assert syms and any("retry_options" in s for s in syms)
+    # over-budget: floor keeps the recalled file whole, never slices
+    assert shaped == {"src/smallworks/retry_options.py": existing["src/smallworks/retry_options.py"]}

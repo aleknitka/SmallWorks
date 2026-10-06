@@ -86,6 +86,41 @@ def _read_existing(task: ImplementationTask, workdir: object) -> dict[str, str]:
                 continue
     return existing
 
+
+def _phase2_context(
+    task: ImplementationTask, existing: dict[str, str], symbols: list[str] | None,
+    flags: object, budget_chars: int,
+) -> tuple[dict[str, str], list[str] | None]:
+    """Flag-gated context shaping (plan 07 items 4-5); flags off = passthrough.
+
+    semantic_retrieval: rank worktree file sketches against the task text and
+    pass the winners as symbols (Serena-adapter shape: refs into layers).
+    context_optimisation: cap existing-files text at the tuned budget, biggest
+    files first — structure of the packet is unchanged, only its size.
+    """
+    if flags is None:
+        return existing, symbols
+    from smallworks.phase2 import keyword_recall
+
+    syms = symbols
+    enabled = getattr(flags, "semantic_retrieval", False)
+    if enabled and not syms:
+        docs = [(name, text[:2_000]) for name, text in existing.items()]
+        hits = keyword_recall(f"{task.behaviour} {' '.join(task.acceptance_criteria)}", docs)
+        syms = hits or None
+    tuned = existing
+    if getattr(flags, "context_optimisation", False):
+        total = sum(len(t) for t in existing.values())
+        if total > budget_chars:
+            ranked = sorted(existing, key=lambda n: (n not in (syms or []), len(existing[n])))
+            keep: dict[str, str] = {}
+            for name in ranked:
+                if sum(len(t) for t in keep.values()) + len(existing[name]) <= budget_chars:
+                    keep[name] = existing[name]
+            tuned = keep or {ranked[0]: existing[ranked[0]]}
+    return tuned, syms
+
+
 def _apply_patch(task: ImplementationTask, patch: Patch, workdir: object, *, verify: bool = False) -> None:
     """Materialize ``patch.contents`` under ``workdir``.
     Under ``verify`` every entry of ``files_changed`` needs full text in
@@ -138,6 +173,8 @@ class Workflow:
     worktree_root: str | None = None
     verify: bool = False
     security_check: object = None  # (task, patch) -> bool; None = pass (scanner plugs in here)
+    phase2_flags: object = None  # Phase2Flags; retrieval + budget tuning apply only when on
+    packet_budget_chars: int = 8_000  # default developer existing-files budget
 
     def run_task(self, task: ImplementationTask, *, symbols: list[str] | None = None) -> TaskResult:
         log = logger.bind(component="workflow", task_id=task.task_id)
@@ -154,9 +191,13 @@ class Workflow:
                 states.append(TaskState.DEVELOP)
                 try:
                     with worktree_for(task.task_id, root=self.worktree_root) as workdir:
+                        shaped, syms = _phase2_context(
+                            task, _read_existing(task, workdir), symbols,
+                            self.phase2_flags, self.packet_budget_chars,
+                        )
                         last_patch = developer_task(
-                            task, self.gateway, symbols=symbols,
-                            existing=_read_existing(task, workdir), feedback=feedback,
+                            task, self.gateway, symbols=syms,
+                            existing=shaped, feedback=feedback,
                         )
                         _apply_patch(task, last_patch, workdir, verify=self.verify)
                         states.append(TaskState.TEST)
@@ -257,6 +298,8 @@ def run_workflow(
     passed: set[str] | None = None,
     verify: bool = False,
     security_check: object = None,
+    phase2_flags: object = None,
+    packet_budget_chars: int = 8_000,
 ) -> list[TaskResult]:
     """Run tasks in dependency waves; each wave fans out, each keeps its gated sequence.
 
@@ -302,13 +345,15 @@ def run_workflow(
             outcomes[runnable[0].task_id] = Workflow(
                 gateway, max_retries=max_retries, worktree_root=worktree_root,
                 verify=verify, security_check=security_check,
+                phase2_flags=phase2_flags, packet_budget_chars=packet_budget_chars,
             ).run_task(runnable[0])
         elif runnable:
             with ThreadPoolExecutor(max_workers=min(max_workers, len(runnable))) as pool:
                 futures = {
                     pool.submit(
                         Workflow(gateway, max_retries=max_retries, worktree_root=worktree_root,
-                                 verify=verify, security_check=security_check).run_task, t
+                                 verify=verify, security_check=security_check,
+                                 phase2_flags=phase2_flags, packet_budget_chars=packet_budget_chars).run_task, t
                     ): t
                     for t in runnable
                 }
