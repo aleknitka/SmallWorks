@@ -15,6 +15,7 @@ flows downstream. Roles:
 from __future__ import annotations
 
 import json
+import re
 
 from pydantic import ValidationError
 
@@ -77,13 +78,14 @@ def _parse_json(text: str, *, role: str, task_id: str) -> dict:
             candidates.append(text[start:end])
     for candidate in candidates:
         for fixed in (candidate, candidate + "}", candidate + "}}"):
+            cleaned = re.sub(r",(\s*[}\]])", r"\1", fixed)
             try:
-                data = json.loads(fixed)
+                data = json.loads(cleaned)
             except json.JSONDecodeError:
                 continue
             if isinstance(data, dict):
-                if fixed != candidate:
-                    log.warning("repaired {} output by appending brace(s)", role)
+                if cleaned != candidate:
+                    log.warning("repaired {} output (trailing comma/braces)", role)
                 return data
     log.error("unparseable {} output", role)
     raise WorkerError(f"{role} returned unparseable JSON")
