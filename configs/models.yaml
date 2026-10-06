@@ -17,7 +17,7 @@ models:
       - provider: ollama
         model: gpt-oss:latest
         class: self-hosted
-        params: {temperature: 0, num_predict: 4096}
+        params: {temperature: 0, num_predict: 8192, num_ctx: 16384}
       - provider: ollama
         model: mistral-nemo:12b
         class: self-hosted

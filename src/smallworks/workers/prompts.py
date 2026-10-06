@@ -20,8 +20,9 @@ def architect_prompt(idea: str, overview: str) -> str:
         "explicitly; stdlib-only unless the idea demands otherwise. "
         f"{JSON_ONLY} Shape: "
         '{"project": "<name>", "modules": [{"name": "<m>", "responsibility": "...", '
-        '"interface": "...", "acceptance_criteria": ["..."]}], "dependencies": [], '
-        '"acceptance_criteria": ["..."]}. '
+        '"interface": "...", "acceptance_criteria": ["..."]}], "dependencies": ["a -> b"], '
+        '"acceptance_criteria": ["..."]}. Dependencies are STRINGS like "cache -> store", '
+        "never objects. "
         "Module interfaces pin function/class names, signatures, and error "
         "behaviour — the Engineer will treat them as binding."
     )
