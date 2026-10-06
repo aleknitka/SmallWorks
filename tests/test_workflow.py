@@ -166,6 +166,36 @@ def test_diamond_dependency_runs_in_waves(tmp_path):
     assert [r.task_id for r in results] == ["AUTH-020", "AUTH-019", "AUTH-018", "AUTH-017"]
     assert all(r.outcome == TaskOutcome.PASSED for r in results)
 
+def test_security_hook_escalates_for_human(tmp_path):
+    gw = _gateway(_texts())
+    result = Workflow(gw, worktree_root=str(tmp_path),
+                      security_check=lambda task, patch: False).run_task(_task())
+    assert result.outcome == TaskOutcome.ESCALATED
+    assert result.decision.action == "escalate"
+    assert "security gate failed" in result.decision.reason
+
+
+def test_fixture_blueprint_end_to_end(tmp_path):
+    """Plan 04 §5 acceptance: two modules through run_workflow; a wave-2
+    security failure escalates for a human while wave-1 passes."""
+    gw = _gateway(_texts())
+    auth = _task("AUTH-017")
+    billing = _dep_task("BILL-005", "AUTH-017")
+    billing = ImplementationTask(
+        task_id=billing.task_id, module="billing", behaviour=billing.behaviour,
+        allowed_files=billing.allowed_files,
+        acceptance_criteria=billing.acceptance_criteria,
+        depends_on=billing.depends_on,
+    )
+    results = run_workflow(
+        [auth, billing], gw, max_workers=2, worktree_root=str(tmp_path),
+        security_check=lambda task, patch: task.task_id != "BILL-005",
+    )
+    by_id = {r.task_id: r for r in results}
+    assert by_id["AUTH-017"].outcome == TaskOutcome.PASSED
+    assert by_id["BILL-005"].outcome == TaskOutcome.ESCALATED
+    assert by_id["BILL-005"].decision.reason == "security gate failed"
+
 
 def test_failed_dependency_blocks_dependent_without_running(tmp_path):
     gw = _gateway(_texts(pass_tests=False))

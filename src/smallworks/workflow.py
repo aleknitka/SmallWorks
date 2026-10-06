@@ -137,6 +137,7 @@ class Workflow:
     max_retries: int = 2
     worktree_root: str | None = None
     verify: bool = False
+    security_check: object = None  # (task, patch) -> bool; None = pass (scanner plugs in here)
 
     def run_task(self, task: ImplementationTask, *, symbols: list[str] | None = None) -> TaskResult:
         log = logger.bind(component="workflow", task_id=task.task_id)
@@ -184,11 +185,13 @@ class Workflow:
                 continue
             states.append(TaskState.DECIDE)
             forbidden = any(f not in task.allowed_files for f in last_patch.files_changed)
+            secure = True if self.security_check is None else bool(self.security_check(task, last_patch))
             gated = validate_decision(
                 Decision(task_id=task.task_id, action="pass"),
                 test_report=last_report,
                 review=last_review,
                 forbidden_files_touched=forbidden,
+                security_gate_passed=secure,
             )
             log.debug("gated decision={} review={}", gated.action, last_review.verdict)
             if last_review.verdict == "ESCALATE":
@@ -253,6 +256,7 @@ def run_workflow(
     worktree_root: str | None = None,
     passed: set[str] | None = None,
     verify: bool = False,
+    security_check: object = None,
 ) -> list[TaskResult]:
     """Run tasks in dependency waves; each wave fans out, each keeps its gated sequence.
 
@@ -296,13 +300,15 @@ def run_workflow(
                 log.debug("task {} blocked by {}", t.task_id, unmet)
         if len(runnable) == 1:
             outcomes[runnable[0].task_id] = Workflow(
-                gateway, max_retries, worktree_root, verify
+                gateway, max_retries=max_retries, worktree_root=worktree_root,
+                verify=verify, security_check=security_check,
             ).run_task(runnable[0])
         elif runnable:
             with ThreadPoolExecutor(max_workers=min(max_workers, len(runnable))) as pool:
                 futures = {
                     pool.submit(
-                        Workflow(gateway, max_retries, worktree_root, verify).run_task, t
+                        Workflow(gateway, max_retries=max_retries, worktree_root=worktree_root,
+                                 verify=verify, security_check=security_check).run_task, t
                     ): t
                     for t in runnable
                 }
