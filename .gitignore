@@ -17,3 +17,4 @@ logs/
 # Secrets: API keys live in .env (written by the Providers page), never in git.
 .env
 .env.*
+work/
