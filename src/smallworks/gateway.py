@@ -212,6 +212,7 @@ class OpenAICompatibleTransport:
             "model": resolved.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            "keep_alive": "30m",  # stay resident across role-call gaps; idle eviction reloads cold
         }
         payload.update(resolved.params)
         try:
