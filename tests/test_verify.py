@@ -197,7 +197,7 @@ def test_temperature_zero_reaches_wire_payload():
         SpyTransport().complete(local, "hi", task_id="T-0")
     except RuntimeError:
         pass
-    assert seen.get("temperature") == 0
+    assert seen.get("options", {}).get("temperature") == 0
 
 
 def test_revise_block_absent_without_feedback():

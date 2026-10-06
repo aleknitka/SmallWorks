@@ -206,6 +206,8 @@ class OpenAICompatibleTransport:
         log = logger.bind(
             component="gateway", task_id=task_id, deployment=deployment.display_name, provider=provider
         )
+        if provider == "ollama":
+            return self._ollama_complete(resolved, prompt, task_id=task_id, log=log)
         url = resolved.base_url.rstrip("/") + "/chat/completions"
         log.debug("POST {} model={} prompt_chars={}", url, resolved.model, len(prompt))
         payload: dict = {
@@ -228,7 +230,8 @@ class OpenAICompatibleTransport:
             raise TransportError(f"{provider} HTTP {resp.status_code}: {resp.text[:300]}")
         try:
             body = resp.json()
-            text = body["choices"][0]["message"]["content"] or ""
+            msg = body["choices"][0]["message"]
+            text = msg.get("content") or msg.get("reasoning") or ""
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise TransportError(f"{provider} bad response envelope: {exc}") from exc
         usage = body.get("usage") or {}
@@ -237,6 +240,56 @@ class OpenAICompatibleTransport:
             input_tokens=int(usage.get("prompt_tokens", 0) or 0),
             output_tokens=int(usage.get("completion_tokens", 0) or 0),
             cost=0.0,  # self-hosted + proxy: cost attributed by later accounting, not the wire
+        )
+        log.debug(
+            "response chars={} in_tokens={} out_tokens={}",
+            len(text),
+            result.input_tokens,
+            result.output_tokens,
+        )
+        return result
+
+    def _ollama_complete(self, resolved: ResolvedEndpoint, prompt: str, *, task_id: str, log) -> TransportResult:
+        """Native /api/chat: honors num_ctx (the OpenAI-compat path ignores it
+
+        and reinitializes the slot at the model's full default window — 262k
+        for ornith → 15GB CPU spill → transport timeouts). Params map:
+        num_ctx/temperature/num_predict → options; keep_alive holds the slot.
+        """
+        url = resolved.base_url.replace("/v1", "") + "/api/chat"
+        options: dict = {"num_ctx": int(resolved.params.get("num_ctx", 16384))}
+        for key in ("temperature", "num_predict", "top_p", "seed"):
+            if resolved.params.get(key) is not None:
+                options[key] = resolved.params[key]
+        log.debug("POST {} model={} prompt_chars={} ctx={}", url, resolved.model, len(prompt), options["num_ctx"])
+        try:
+            resp = httpx.post(
+                url,
+                json={
+                    "model": resolved.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False,
+                    "keep_alive": "30m",
+                    "options": options,
+                },
+                headers=resolved.headers or None,
+                timeout=self.timeout_s,
+            )
+        except httpx.HTTPError as exc:
+            raise TransportError(f"ollama request failed: {exc}") from exc
+        if resp.status_code != 200:
+            raise TransportError(f"ollama HTTP {resp.status_code}: {resp.text[:300]}")
+        try:
+            body = resp.json()
+            msg = body.get("message") or {}
+            text = msg.get("content") or msg.get("thinking") or ""
+        except (ValueError, AttributeError) as exc:
+            raise TransportError(f"ollama bad response envelope: {exc}") from exc
+        result = TransportResult(
+            text=text,
+            input_tokens=int(body.get("prompt_eval_count", 0) or 0),
+            output_tokens=int(body.get("eval_count", 0) or 0),
+            cost=0.0,
         )
         log.debug(
             "response chars={} in_tokens={} out_tokens={}",
