@@ -157,6 +157,7 @@ class Workflow:
                             task, self.gateway, symbols=symbols,
                             existing=_read_existing(task, workdir), feedback=feedback,
                         )
+                        _apply_patch(task, last_patch, workdir, verify=self.verify)
                         states.append(TaskState.TEST)
                         last_report = tester_task(task, last_patch, self.gateway,
                                                   verify=self.verify, root=workdir)

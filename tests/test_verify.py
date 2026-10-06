@@ -142,6 +142,39 @@ def test_workflow_rejects_claimed_pass_without_execution(tmp_path):
     assert result.test_report is not None and result.test_report.tests_run == 0
 
 
+def test_workflow_materializes_patch_before_testing(tmp_path):
+    """End-to-end: patch contents land on disk so verify measures real runs."""
+    import json
+    import importlib.util
+    from pathlib import Path
+
+    import smallworks.workflow as workflow_mod
+
+    spec = importlib.util.spec_from_file_location(
+        "tw", Path("tests/test_workflow.py"))
+    tw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tw)
+    KeyedTransport, RoleGateway = tw.KeyedTransport, tw.RoleGateway
+    _models, _policy, _workers = tw._models, tw._policy, tw._workers
+
+    texts = {
+        "engineer": json.dumps({"tasks": []}),
+        "developer": json.dumps(
+            {"files_changed": ["tests/test_auth_probe.py"], "summary": "fix",
+             "contents": {"tests/test_auth_probe.py": "def test_ok():\n    assert 1 + 1 == 2\n"}}
+        ),
+        "tester": json.dumps({"passed": True, "tests_run": 1, "tests_failed": 0}),
+        "reviewer": json.dumps({"verdict": "PASS", "notes": "fine"}),
+        "writer": "docs.",
+    }
+    gw = RoleGateway(_models(), _workers(), _policy(), transport=KeyedTransport(texts))
+    (tmp_path / "tests").mkdir()
+    result = workflow_mod.Workflow(gw, max_retries=0, worktree_root=str(tmp_path),
+                                   verify=True).run_task(_task())
+    assert result.decision.action == "pass"
+    assert result.test_report is not None and result.test_report.tests_run == 1
+
+
 def test_prompt_carries_existing_file_text():
     from smallworks.workers.prompts import developer_prompt
 
