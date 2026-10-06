@@ -90,6 +90,79 @@ def post_control(run_id: str, body: ControlIn) -> dict:
     )
     return {"run_id": run_id, "state": state}
 
+
+class ArchitectIn(BaseModel):
+    idea: str = Field(min_length=1)
+
+
+def _repo_overview(budget_chars: int = 8_000) -> str:
+    """Budget-capped repo sketch for the Architect (Repomix stand-in).
+
+    File list + sizes + first-line docstrings, largest-dirs-first
+    truncation. Same progressive-disclosure spirit as build_packet:
+    structure first, retrievable refs (paths), never full dumps.
+    """
+    root = Path(__file__).parent
+    entries: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+        entries.append(f"{path.relative_to(root)} ({len(text)}ch) :: {first[:100]}")
+    lines, used = [], 0
+    for entry in entries:
+        if used + len(entry) > budget_chars:
+            lines.append(f"... +{len(entries) - len(lines)} more (ref: path)")
+            break
+        lines.append(entry)
+        used += len(entry)
+    return "\n".join(lines)
+
+
+@app.post("/api/architect")
+def post_architect(body: ArchitectIn) -> dict:
+    """Architect extension behind the ``architect`` flag (plan 07).
+
+    Builds a budget-capped repo overview, runs idea -> Blueprint on the
+    strong_reasoning pool, and returns the Blueprint plus the human gate
+    (``blueprint``) it must pass before Engineer work. Flag off -> 404.
+    """
+    from smallworks.config import default_config_dir, load_configs, load_factory
+    from smallworks.gateway import Gateway, OpenAICompatibleTransport
+    from smallworks.phase2 import Phase2Disabled, architect_approval_gate, load_phase2, run_architect
+
+    try:
+        if not load_phase2().architect:
+            raise Phase2Disabled("architect flag is off")
+    except Phase2Disabled as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    cfg = default_config_dir()
+    loaded = load_configs(cfg / "models.yaml", cfg / "workers.yaml", cfg / "providers.yaml")
+    raw = __import__("yaml").safe_load((cfg / "factory.yaml").read_text())["factory"]
+    from smallworks.config import FactoryPolicy
+
+    policy = FactoryPolicy.model_validate(
+        {
+            "mode": raw["mode"],
+            "max_retries": 3,
+            "approvals_required": raw["approvals_required"],
+            "max_cost_per_task": raw["budgets"]["max_cost_per_task"],
+            "max_wallclock_minutes": raw["budgets"]["max_wallclock_minutes"],
+        }
+    )
+    gw = Gateway(
+        loaded.models, dict(loaded.workers), policy,
+        transport=OpenAICompatibleTransport(timeout_s=300.0), groups=loaded.groups,
+    )
+    blueprint = run_architect(body.idea, gw, overview=_repo_overview(), flags=load_phase2())
+    logger.bind(component="service", route="post_architect").info(
+        "blueprint project={} modules={}", blueprint.project, len(blueprint.modules)
+    )
+    return {"blueprint": blueprint.model_dump(mode="json"), "gate": architect_approval_gate()}
+
+
 class MilestoneControlIn(BaseModel):
     task_id: str = Field(min_length=1)  # task AUTH-017 or milestone AUTH-M1
     action: str = Field(min_length=1)

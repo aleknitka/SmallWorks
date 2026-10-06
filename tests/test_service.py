@@ -156,3 +156,16 @@ def test_todos_crud_and_move():
     assert moved["status"] == "running"
     assert client.post("/api/todos/todo-trial/move", json={"status": "done-ish"}).status_code == 422
     assert client.post("/api/todos/nope/move", json={"status": "passed"}).status_code == 404
+
+
+def test_architect_flag_off_404s():
+    res = client.post("/api/architect", json={"idea": "a retry engine"})
+    assert res.status_code == 404
+
+
+def test_repo_overview_budget_capped():
+    from smallworks.service import _repo_overview
+
+    text = _repo_overview(budget_chars=500)
+    assert len(text) <= 700  # entries + one truncation line
+    assert "ref: path" in text  # overflow pointer, not a dump
